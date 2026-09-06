@@ -1,0 +1,72 @@
+/* 全局样式：宣纸底色 + 墨色卡片的极简底子，页面级细化放各自 css。 */
+page {
+  background: #f4efe4;
+  color: #33291f;
+  font-size: 28rpx;
+}
+
+.page {
+  padding: 24rpx;
+}
+
+.card {
+  background: #fffdf7;
+  border: 2rpx solid #e3d9c6;
+  border-radius: 16rpx;
+  padding: 24rpx;
+  margin-bottom: 24rpx;
+}
+
+.card-title {
+  font-weight: 600;
+  margin-bottom: 16rpx;
+}
+
+.muted {
+  color: #8a7d6a;
+  font-size: 24rpx;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.btn-primary {
+  margin-top: 24rpx;
+  background: #7a4f2b;
+  color: #fff;
+}
+
+/* 境界等级着色：练气青 / 筑基蓝 / 金丹紫 / 元婴金。 */
+.tone-qi {
+  color: #3c7a5a;
+}
+
+.tone-foundation {
+  color: #2f6f9f;
+}
+
+.tone-golden {
+  color: #7a4f9f;
+}
+
+.tone-nascent {
+  color: #b8860b;
+}
+
+.error-line {
+  color: #b03030;
+  font-size: 24rpx;
+  margin-top: 12rpx;
+}
+
+.banner-ending {
+  background: #fdf3e7;
+  border: 2rpx solid #d9a05b;
+  border-radius: 16rpx;
+  padding: 20rpx 24rpx;
+  margin-bottom: 24rpx;
+  color: #8a5a1f;
+}

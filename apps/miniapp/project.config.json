@@ -1,0 +1,22 @@
+{
+  "miniprogramRoot": "dist/",
+  "compileType": "miniprogram",
+  "projectname": "simple-xiuxian-miniapp",
+  "description": "《掌门，不好了》小程序简化版",
+  "appid": "touristappid",
+  "setting": {
+    "es6": false,
+    "enhance": false,
+    "postcss": false,
+    "minified": true,
+    "urlCheck": true,
+    "coverView": true,
+    "ignoreUploadUnusedFiles": true,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
+  },
+  "condition": {}
+}

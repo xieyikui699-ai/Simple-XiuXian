@@ -3,6 +3,7 @@
   "files": {
     "ignore": [
       "**/dist/**",
+      "**/dist-test/**",
       "**/node_modules/**",
       "**/.data/**",
       "**/.turbo/**",

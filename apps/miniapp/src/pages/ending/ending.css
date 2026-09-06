@@ -1,0 +1,23 @@
+.ending-card {
+  border-color: #d9a05b;
+  background: #fdf6e8;
+}
+
+.ending-text {
+  display: block;
+  font-size: 30rpx;
+  line-height: 1.6;
+  margin-bottom: 12rpx;
+}
+
+.ending-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  padding: 10rpx 0;
+  border-bottom: 2rpx solid #f0e8d8;
+}
+
+.ending-row:last-child {
+  border-bottom: none;
+}

@@ -1,0 +1,63 @@
+.roster-head {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.btn-recruit {
+  font-size: 24rpx;
+  padding: 0 20rpx;
+  line-height: 56rpx;
+  height: 56rpx;
+  background: #3c7a5a;
+  color: #fff;
+}
+
+.recruit-panel {
+  margin-top: 16rpx;
+}
+
+.candidate-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 0;
+  border-bottom: 2rpx solid #f0e8d8;
+}
+
+.candidate-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  flex: 1;
+}
+
+.btn-admit {
+  font-size: 24rpx;
+  padding: 0 20rpx;
+  line-height: 56rpx;
+  height: 56rpx;
+  background: #7a4f2b;
+  color: #fff;
+}
+
+.disciple-row {
+  padding: 16rpx 0;
+  border-bottom: 2rpx solid #f0e8d8;
+}
+
+.disciple-row:last-child {
+  border-bottom: none;
+}
+
+.disciple-name {
+  font-weight: 600;
+}
+
+.disciple-zhenyuan {
+  color: #8a7d6a;
+  font-size: 24rpx;
+  margin-top: 4rpx;
+}

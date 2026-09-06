@@ -1,0 +1,37 @@
+.chronicle-row {
+  display: flex;
+  flex-direction: row;
+  gap: 16rpx;
+  padding: 14rpx 0;
+  border-bottom: 2rpx solid #f0e8d8;
+}
+
+.chronicle-row:last-child {
+  border-bottom: none;
+}
+
+.chronicle-kind {
+  flex-shrink: 0;
+  width: 96rpx;
+  font-size: 22rpx;
+  color: #8a7d6a;
+}
+
+.chronicle-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  flex: 1;
+}
+
+.chronicle-milestone {
+  color: #7a5a12;
+}
+
+.chronicle-warning {
+  color: #b03030;
+}
+
+.chronicle-normal {
+  color: #33291f;
+}

@@ -1,0 +1,42 @@
+{
+  "name": "@simple-xiuxian/miniapp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "《掌门，不好了》小程序简化版：Taro(React) 小程序壳",
+  "scripts": {
+    "dev:weapp": "taro build --type weapp --watch",
+    "build:weapp": "taro build --type weapp",
+    "build": "pnpm run build:weapp",
+    "test": "esbuild src/store/game-store.test.ts --bundle --format=esm --platform=node --external:@simple-xiuxian/engine --outfile=dist-test/game-store.test.mjs && node --test dist-test/game-store.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "browserslist": ["last 3 versions", "Android >= 4.1", "ios >= 8"],
+  "dependencies": {
+    "@babel/runtime": "^7.24.4",
+    "@simple-xiuxian/engine": "workspace:*",
+    "@tarojs/components": "4.2.1",
+    "@tarojs/helper": "4.2.1",
+    "@tarojs/plugin-framework-react": "4.2.1",
+    "@tarojs/plugin-platform-weapp": "4.2.1",
+    "@tarojs/react": "4.2.1",
+    "@tarojs/runtime": "4.2.1",
+    "@tarojs/shared": "4.2.1",
+    "@tarojs/taro": "4.2.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.4",
+    "@babel/preset-react": "^7.24.1",
+    "@tarojs/cli": "4.2.1",
+    "@tarojs/webpack5-runner": "4.2.1",
+    "@types/node": "22.15.3",
+    "@types/react": "^18.3.12",
+    "@types/webpack-env": "^1.18.5",
+    "babel-preset-taro": "4.2.1",
+    "esbuild": "^0.25.0",
+    "react-refresh": "^0.14.0",
+    "typescript": "5.8.3"
+  }
+}

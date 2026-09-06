@@ -1,0 +1,34 @@
+.detail-head {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.detail-name {
+  font-size: 36rpx;
+  font-weight: 700;
+}
+
+.attr-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  padding: 10rpx 0;
+  border-bottom: 2rpx solid #f0e8d8;
+}
+
+.attr-row:last-child {
+  border-bottom: none;
+}
+
+.talent-row {
+  display: flex;
+  flex-direction: column;
+  padding: 10rpx 0;
+  gap: 4rpx;
+}
+
+.talent-name {
+  font-weight: 600;
+}
