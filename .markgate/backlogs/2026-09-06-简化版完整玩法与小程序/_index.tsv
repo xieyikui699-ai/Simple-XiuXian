@@ -3,15 +3,15 @@ T-E00-F01-001	DONE	无	新建于 packages/engine/src/battle.test.ts	D-004,D-007,
 T-E00-F02-001	DONE	无	新建于 packages/engine/src/catalog.test.ts	D-005,D-006,D-007,D-008,D-009,D-002	P0	READY	LOW	V1	INLINE	zcode-p0
 T-E00-F03-001	DONE	无	新建于 packages/engine/src/rival.test.ts	D-015,D-016,D-017,D-018,D-019,D-020	P0	READY	LOW	V1	INLINE	zcode-p0
 T-E00-F04-001	DONE	无	新建于 packages/engine/src/expedition.test.ts	D-014,D-013,D-021	P0	READY	LOW	V1	INLINE	zcode-p0
-T-E01-F01-001	IN_PROGRESS	T-E00-F01-001	新建于 packages/engine/src/combat-profile.ts	D-010,D-004	P0	READY	MEDIUM	V2	INLINE	zcode-p1
-T-E01-F02-001	IN_PROGRESS	T-E01-F01-001	新建于 packages/engine/src/battle.ts	D-011,D-013	P0	READY	HIGH	V2	INLINE	zcode-p1
-T-E01-F03-001	IN_PROGRESS	T-E01-F02-001	新建于 packages/engine/src/battle-status.ts	D-012	P0	READY	HIGH	V2	INLINE	zcode-p1
+T-E01-F01-001	DONE	T-E00-F01-001	新建于 packages/engine/src/combat-profile.ts	D-010,D-004	P0	READY	MEDIUM	V2	INLINE	zcode-p1
+T-E01-F02-001	DONE	T-E01-F01-001	新建于 packages/engine/src/battle.ts	D-011,D-013	P0	READY	HIGH	V2	INLINE	zcode-p1
+T-E01-F03-001	DONE	T-E01-F02-001	新建于 packages/engine/src/battle-status.ts	D-012	P0	READY	HIGH	V2	INLINE	zcode-p1
 T-E02-F01-001	DONE	T-E00-F02-001	新建于 packages/engine/src/catalog.ts	D-005,D-006,D-007,D-008,D-009	P0	-	MEDIUM	V2	INLINE	zcode-p2
 T-E02-F02-001	DONE	T-E02-F01-001	新建于 packages/engine/src/production.ts	D-008,D-009	P0	-	MEDIUM	V2	INLINE	zcode-p2
 T-E02-F03-001	IN_PROGRESS	T-E02-F02-001,T-E01-F03-001	packages/engine/src/engine.ts	D-002,D-006,D-007,D-008,D-009	P0	-	MEDIUM	V2	INLINE	zcode-p3
 T-E03-F01-001	IN_PROGRESS	T-E01-F02-001,T-E02-F01-001	新建于 packages/engine/src/expedition.ts	D-014,D-003,D-019	P0	-	HIGH	V3	INLINE	zcode-p3
 T-E03-F02-001	IN_PROGRESS	T-E03-F01-001	packages/engine/src/settlement.ts	D-013,D-021	P0	-	MEDIUM	V2	INLINE	zcode-p3
-T-E04-F01-001	PENDING	T-E00-F03-001,T-E01-F01-001	新建于 packages/engine/src/rival.ts	D-015,D-016	P0	-	HIGH	V3	INLINE	-
+T-E04-F01-001	PENDING	T-E00-F03-001,T-E01-F01-001	新建于 packages/engine/src/rival.ts	D-015,D-016	P0	READY	HIGH	V3	INLINE	-
 T-E04-F02-001	PENDING	T-E04-F01-001,T-E03-F01-001	packages/engine/src/rival.ts	D-017,D-014	P0	-	MEDIUM	V2	INLINE	-
 T-E04-F03-001	PENDING	T-E04-F02-001,T-E01-F03-001	新建于 packages/engine/src/sect-war.ts	D-018,D-019,D-013	P0	-	HIGH	V3	INLINE	-
 T-E04-F04-001	PENDING	T-E04-F03-001	packages/engine/src/settlement.ts	D-019,D-020,D-021,D-016	P0	-	HIGH	V3	INLINE	-

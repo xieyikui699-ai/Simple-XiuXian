@@ -3,7 +3,7 @@
 三任务同 owner 严格串行（F01 → F02 → F03），共同 owner 为 packages/engine 战斗域。全部确定性：无 Math.random，掷骰走 sha256。
 
 ### T-E01-F01-001 战斗属性派生 combat-profile
-- 状态：PENDING
+- 状态：DONE
 - 设计来源：D-010；D-004
 - owner：新建于 packages/engine/src/combat-profile.ts
 - 设计要点：buildCombatProfile(disciple)——唯一公式 owner：生命=100+体魄×5+(实力等级−1)×50、物攻=力量×2+武器、法威=魂力×2+法宝、防御=⌊体魄×1.5+护甲⌋、先攻=身法+天赋先攻+减速修正；有效五维经既有 effectiveAttributes（天赋+功法+装备平加聚合）；返回分来源明细（基础/天赋/功法/装备）供 UI tooltip；玩家与 NPC 共用，不做弟子 clamp 例外。
@@ -16,10 +16,10 @@
 - 验证画像：V2（引擎单测）
 - 授权边界：INLINE（仓库内实现）
 - 执行者：zcode-p1（2026-09-06 claim，批次串行 F01→F02→F03）
-- 完成证据：-
+- 完成证据：combat-profile.ts 落地 deriveCombatProfile（唯一公式 owner）+ buildCombatProfile 弟子适配层（天赋/功法/装备聚合 → 有效五维 clamp(1,100)，分来源明细供 tooltip）；combat.test.ts 属性派生锚点（生命 350/800/1050、物攻 110/270、法威 108/132、防御 ⌊…⌋、先攻、暴击 5+8 封顶 50）全绿；同输入双跑 deepEqual；battle 域 32/32 通过。
 
 ### T-E01-F02-001 1v1 回合引擎 battle
-- 状态：PENDING
+- 状态：DONE
 - 设计来源：D-011；D-013
 - owner：新建于 packages/engine/src/battle.ts
 - 设计要点：resolveBattle({seed, attacker, defender, turn, source})——先攻定序（同值攻方先）；每回合行动选择：确定性策略（可用法术按倍率从高到低、CD 未好则普攻；双方同策略）；伤害=max(1, round(攻击×倍率−防御×0.8))；命中 90%（sha256 掷骰）；暴击 5+天赋 critFlat（≤50）1.5×；战报逐回合记录（行动/伤害/状态/剩余生命）；先手致死即止；30 回合未分胜负判平（双方无伤势）；战败方 40% 轻伤/20% 重伤掷骰；source 标记（expedition/ambush-war 等）。
@@ -32,10 +32,10 @@
 - 验证画像：V2（引擎单测 + 既有回归）
 - 授权边界：INLINE（仓库内实现）
 - 执行者：zcode-p1（2026-09-06 claim，批次串行 F01→F02→F03）
-- 完成证据：-
+- 完成证据：battle.ts 落地 runBattle（含 epic 命名位 resolveBattle 对象签名入口）；先攻定序同值攻方先、plan 行动脚本 CD 回落普攻、伤害 max(1, round(攻×倍率−防×0.8)) 暴击 ×1.5、命中 90 掷骰、30 回合平局无伤势、战败 40/20 伤势掷骰、同 seed 双跑 deepEqual 全绿（combat.test.ts 回合规则节）；200 场命中率 (0.85,0.95)/暴击 (0.03,0.08) 统计断言通过。
 
 ### T-E01-F03-001 状态效果系统 battle-status
-- 状态：PENDING
+- 状态：DONE
 - 设计来源：D-012
 - owner：新建于 packages/engine/src/battle-status.ts
 - 设计要点：五类状态（灼烧 6%/8% 最大生命 3/2 回合、冰冻 1 回合、减速先攻 −5 3 回合、护盾吸收直至破除、反伤受击 10%）；同状态不叠加、异源刷新取最强（倍率/时长字典序）；抗性 statusResistPct 按概率抵消附加（sha256 掷骰）；接入 resolveBattle 行动前结算（冰冻跳行动）与回合末结算（灼烧扣血可致死，毒不可致死语义不引入——灼烧可致死）；战报 statusNote 标注。
@@ -48,4 +48,4 @@
 - 验证画像：V2（引擎单测 + 确定性双跑）
 - 授权边界：INLINE（仓库内实现）
 - 执行者：zcode-p1（2026-09-06 claim，批次串行 F01→F02→F03）
-- 完成证据：-
+- 完成证据：battle-status.ts 落地五类状态纯逻辑（tickStatus/attachStatus/statusResisted/shieldCapacity/absorbWithShield/reflectDamage）并接入 runBattle：灼烧回合末直接扣血可致死、冰冻次回合跳行动、减速先攻 −5 持续 3 回合、护盾吸收直至破除、反伤 10%、抗性按概率抵消（sha256 掷骰）、同状态不叠加异源取最强；battle.test.ts（E00-F01 状态金测）全绿 + combat.test.ts 接入行为断言全绿；未新增第二套掷骰、未改属性派生公式。

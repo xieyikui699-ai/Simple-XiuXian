@@ -47,10 +47,11 @@
 
 ## 执行者与 claim
 
-当前 in-flight claim：T-E01-F01/F02/F03-001（zcode-p1）IN_PROGRESS。T-E00 四项红测已由 zcode-p0 全部 DONE；T-E02-F01/F02-001 已由 zcode-p2 完成（DONE）。其余 PENDING。E02-F01/F02 与 P1 波次交错执行（用户授权）。
+当前 in-flight claim：T-E02-F03-001、T-E03-F01/F02-001（zcode-p3）、T-E05-F03/F04-001（zcode-p5）。T-E00 四项红测（zcode-p0）、T-E01 三项战斗引擎（zcode-p1）、T-E02-F01/F02（zcode-p2）、T-E05-F01/F02（zcode-p5）均已 DONE。E02-F01/F02 与 P1 波次交错执行（用户授权）。
 
 ## 最近检查点
 
 - 2026-09-06：backlog 建立；权威设计补全定稿（功法/法术/装备/丹药/战斗/历练/NPC/会战/UI/调平全表数值）；M1 既有实现登记为回归锚点；W0 四项红测初始 READY，尚未执行。
 - 2026-09-06（P2 波次，zcode-p2）：T-E02-F01-001、T-E02-F02-001 完成。catalog.ts 四表（功法 8/法术 12/装备 4×4/丹药 2）逐字对齐设计文档并随 catalog.test.ts 落地 E00-F02 四表断言；production.ts 岗位/点数/开炉/出炉落地，state.ts 扩展 jobs/warehouse/library 全部旧档兼容。引擎切片 74/74 通过（M1 不回归）、tsc --noEmit 0、biome 我方文件 0 错误。READY 重算：无新 READY（T-E02-F03-001 待 T-E01-F03-001、T-E03-F01-001 待 T-E01-F02-001，均由 P1 波次解锁）。注：E00 红测与 E01 实现仍在飞，全仓 `pnpm -r test` 整体转绿以 P1 收口为准。
 - 2026-09-06（P0 红色契约，zcode-p0）：T-E00-F01/F02/F03/F04-001 全部 DONE。battle.test.ts 锁定状态效果契约（battle-status.ts 未实现 → 红）；catalog.test.ts 复核 zcode-p2 四表 golden 并补升阶条件回归；rival.test.ts 锁定 NPC 生成/月度运行时/宣战/声望/会战/四结局契约；expedition.test.ts 锁定六事件区间、固定 seed 事件序列（node:crypto 预计算）、降级规则、伤势分支与月结 9 步顺序常量。红证据：`pnpm --filter @simple-xiuxian/engine test` 三次连跑 exit=2/2/2，失败精确命中 TS2307（battle-status/expedition/rival/sect-war.js）与 TS2305（settlement 结局导出/MONTHLY_STEP_ORDER）；biome 0 错误。与并行实现方（zcode-p1 combat-profile/battle）API 冲突已协调：属性派生/回合规则 golden 由 combat.test.ts 承担，battle.test.ts 聚焦状态效果。READY 重算：W1 两任务（T-E01-F01-001、T-E02-F01-001）依赖已全部 DONE，两者在索引中均已为 READY（后者已由 zcode-p2 收口）。
+- 2026-09-06（P1 战斗引擎，zcode-p1）：T-E01-F01/F02/F03-001 全部 DONE。combat-profile.ts（deriveCombatProfile 唯一公式 + buildCombatProfile 弟子适配层，分来源明细供 tooltip）；battle.ts（runBattle + epic 命名位 resolveBattle 对象签名入口：先攻定序同值攻方先、plan 行动脚本 CD 回落普攻、伤害 max(1, round(攻×倍率−防×0.8)) 暴击对取整后基础伤害 ×1.5、命中 90、30 回合平局、战败 40/20 伤势掷骰、扁平战报 actions 供 UI 回放）；battle-status.ts（五类状态纯逻辑 + runBattle 接入：灼烧回合末直接扣血可致死、冰冻次回合跳行动、减速 −5×3 回合、护盾吸收直至破除、反伤 10%、抗性按概率抵消，全部 sha256 掷骰，状态附加当回合不结算、次回合起生效）。与 zcode-p0 协调落地：属性派生/回合规则 golden 由 combat.test.ts 承担、battle.test.ts 聚焦状态效果（字段口径 hpPctPerTurn/turnsLeft、attachStatus）。验证：battle.test.js + combat.test.js 32/32 通过（含双跑 deepEqual、200 场命中率/暴击率统计、40 场抗性统计）；我方文件 biome 0 错误；index.ts 导出接线待与 zcode-p3 的 expedition 导出同批提交（避免踩其在途文件）。M1 engine.test 2 处失败（外出历练/飞升）归属 zcode-p3 对 settlement.ts 的在途伤势接线，非本波引入。READY 重算：T-E04-F01-001（依赖 T-E00-F03-001 + T-E01-F01-001）→ READY；T-E03-F01-001 / T-E02-F03-001 依赖本波部分虽已满足，但仍待 zcode-p3 在途的 T-E02/E03 链路收口（其已在 IN_PROGRESS）。
