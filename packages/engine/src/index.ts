@@ -6,6 +6,8 @@ export * from "./lifespan.js";
 export * from "./talents.js";
 export * from "./naming.js";
 export * from "./state.js";
+export * from "./catalog.js";
+export * from "./production.js";
 export * from "./sect.js";
 export * from "./generation.js";
 export * from "./settlement.js";

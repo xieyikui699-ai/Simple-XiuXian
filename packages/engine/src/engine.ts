@@ -12,8 +12,9 @@ import {
   sectUpgradeFailureReason,
   upgradeRequirementFor,
 } from "./sect.js";
-// 引擎门面：开局、月结、招募、提拔、升阶。所有操作返回新状态（纯函数、确定性）。
 import { currentSuccessRate, monthlyZhenyuanGain } from "./settlement.js";
+// 引擎门面：开局、月结、招募、提拔、升阶。所有操作返回新状态（纯函数、确定性）。
+import { emptyLibrary, emptySectJobs, emptyWarehouse } from "./state.js";
 import type { Disciple, GameState, RecruitmentCandidate } from "./state.js";
 
 export type CreateGameInput = {
@@ -47,6 +48,9 @@ export function createGame(input: CreateGameInput): GameState {
       },
     ],
     fallen: [],
+    library: emptyLibrary(),
+    jobs: emptySectJobs(),
+    warehouse: emptyWarehouse(),
   };
 
   const initialAges = [18, 21, 24];

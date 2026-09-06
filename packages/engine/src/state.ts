@@ -1,5 +1,7 @@
 // 游戏状态类型：唯一事实源是 GameState 快照，UI 层负责持久化（小程序本地存储）。
+// M2 扩展字段（library/jobs/warehouse、弟子功法法术装备）均为可选：旧档缺字段时按空值口径兼容。
 import type { DiscipleAttributes } from "./attributes.js";
+import type { CraftJobKind, EquippedGear, GearSlot, GearTier } from "./catalog.js";
 import type { RootElement, RootType } from "./roots.js";
 
 export type DiscipleRole = "inner" | "outer";
@@ -21,6 +23,12 @@ export type Disciple = {
   rootElements: RootElement[];
   attributes: DiscipleAttributes;
   talentIds: string[];
+  /** 已修功法（限 1 门；旧档缺省 = 未修）。 */
+  techniqueId?: string;
+  /** 已修法术（限 2 门；旧档缺省 = 空）。 */
+  spellIds?: string[];
+  /** 已穿戴装备（槽位 → 档位；旧档缺省 = 空）。 */
+  equippedGear?: EquippedGear;
 };
 
 export type MonthlyPolicy = "cultivate" | "develop" | "explore" | "rest";
@@ -53,6 +61,46 @@ export type FallenDisciple = {
   diedTurn: number;
 };
 
+/** 藏经阁拥有的功法/法术书（研读资格来源；历练奇遇入阁）。 */
+export type SectLibrary = {
+  techniqueIds: string[];
+  spellIds: string[];
+};
+
+/** 在炉丹药任务：出炉剩余月数。 */
+export type FurnaceTask = {
+  pillId: string;
+  monthsLeft: number;
+};
+
+/** 车间（丹房/器坊）状态：岗位分配、累积点数、在炉任务。 */
+export type WorkshopState = {
+  /** 岗位分配（丹师/工匠的 discipleId，至多 2 名）。 */
+  workers: string[];
+  /** 已累积未消耗的炼制点数。 */
+  points: number;
+  /** 在炉任务（器坊开炉即出炉，恒为空）。 */
+  tasks: FurnaceTask[];
+};
+
+/** 岗位与生产扩展字段（GameSnapshot jobs；旧档缺字段按空车间口径兼容）。 */
+export type SectJobs = {
+  pill: WorkshopState;
+  gear: WorkshopState;
+};
+
+export type WarehouseGearItem = {
+  slot: GearSlot;
+  tier: GearTier;
+};
+
+export type WarehouseStock = {
+  /** 未穿戴装备。 */
+  gear: WarehouseGearItem[];
+  /** 未服用丹药（按丹药 id 计数）。 */
+  pills: Array<{ pillId: string; count: number }>;
+};
+
 export type GameState = {
   seed: string;
   sectName: string;
@@ -70,7 +118,32 @@ export type GameState = {
   chronicle: ChronicleEntry[];
   fallen: FallenDisciple[];
   ending?: GameEnding;
+  /** 藏经阁（旧档缺省为空）。 */
+  library?: SectLibrary;
+  /** 丹房/器坊岗位与点数（旧档缺省为空）。 */
+  jobs?: SectJobs;
+  /** 仓库（旧档缺省为空）。 */
+  warehouse?: WarehouseStock;
 };
+
+export function emptyWorkshop(): WorkshopState {
+  return { workers: [], points: 0, tasks: [] };
+}
+
+export function emptySectJobs(): SectJobs {
+  return { pill: emptyWorkshop(), gear: emptyWorkshop() };
+}
+
+export function emptyWarehouse(): WarehouseStock {
+  return { gear: [], pills: [] };
+}
+
+export function emptyLibrary(): SectLibrary {
+  return { techniqueIds: [], spellIds: [] };
+}
+
+/** 车间键序（丹房在前，与月结生产步骤口径一致）。 */
+export const CRAFT_JOB_KINDS: readonly CraftJobKind[] = ["pill", "gear"];
 
 export type RecruitmentCandidate = {
   candidateId: string;
