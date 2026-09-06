@@ -268,7 +268,9 @@ function assertInput(input: DiscipleNameGenerationInput): void {
     input.seed.trim().length === 0 ||
     !Number.isInteger(input.ordinal) ||
     input.ordinal < 1 ||
-    input.ordinal > 300
+    // 上限 10000：主仓遗留为 300；简化版 NPC 宗门按月自动招募（长战役/千局调平），
+    // 编号会持续增长，放行至长跑安全量级（避重仍由 usedNames + 64 次重试保证）。
+    input.ordinal > 10_000
   ) {
     throw new TypeError("disciple_name_generation_input_invalid");
   }

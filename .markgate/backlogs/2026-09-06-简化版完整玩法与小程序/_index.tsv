@@ -11,14 +11,14 @@ T-E02-F02-001	DONE	T-E02-F01-001	新建于 packages/engine/src/production.ts	D-0
 T-E02-F03-001	DONE	T-E02-F02-001,T-E01-F03-001	packages/engine/src/engine.ts	D-002,D-006,D-007,D-008,D-009	P0	-	MEDIUM	V2	INLINE	zcode-p3
 T-E03-F01-001	DONE	T-E01-F02-001,T-E02-F01-001	新建于 packages/engine/src/expedition.ts	D-014,D-003,D-019	P0	-	HIGH	V3	INLINE	zcode-p3
 T-E03-F02-001	DONE	T-E03-F01-001	packages/engine/src/settlement.ts	D-013,D-021	P0	-	MEDIUM	V2	INLINE	zcode-p3
-T-E04-F01-001	IN_PROGRESS	T-E00-F03-001,T-E01-F01-001	新建于 packages/engine/src/rival.ts	D-015,D-016	P0	READY	HIGH	V3	INLINE	zcode-p4
-T-E04-F02-001	PENDING	T-E04-F01-001,T-E03-F01-001	packages/engine/src/rival.ts	D-017,D-014	P0	-	MEDIUM	V2	INLINE	-
-T-E04-F03-001	PENDING	T-E04-F02-001,T-E01-F03-001	新建于 packages/engine/src/sect-war.ts	D-018,D-019,D-013	P0	-	HIGH	V3	INLINE	-
-T-E04-F04-001	PENDING	T-E04-F03-001	packages/engine/src/settlement.ts	D-019,D-020,D-021,D-016	P0	-	HIGH	V3	INLINE	-
+T-E04-F01-001	DONE	T-E00-F03-001,T-E01-F01-001	新建于 packages/engine/src/rival.ts	D-015,D-016	P0	-	HIGH	V3	INLINE	zcode-p4
+T-E04-F02-001	DONE	T-E04-F01-001,T-E03-F01-001	packages/engine/src/rival.ts	D-017,D-014	P0	-	MEDIUM	V2	INLINE	zcode-p4
+T-E04-F03-001	DONE	T-E04-F02-001,T-E01-F03-001	新建于 packages/engine/src/sect-war.ts	D-018,D-019,D-013	P0	-	HIGH	V3	INLINE	zcode-p4
+T-E04-F04-001	DONE	T-E04-F03-001	packages/engine/src/settlement.ts	D-019,D-020,D-021,D-016	P0	-	HIGH	V3	INLINE	zcode-p4
 T-E05-F01-001	DONE	T-E04-F04-001（用户指令先行）	新建于 apps/miniapp/	D-022	P0	-	MEDIUM	V2	INLINE	zcode-p5
 T-E05-F02-001	DONE	T-E05-F01-001	apps/miniapp/src/pages/	D-023,D-022	P0	-	MEDIUM	V2	INLINE	zcode-p5
 T-E05-F03-001	IN_PROGRESS	T-E05-F02-001	apps/miniapp/src/pages/	D-023,D-020	P0	-	MEDIUM	V2	INLINE	zcode-p5
 T-E05-F04-001	IN_PROGRESS	T-E05-F03-001	apps/miniapp/	D-022,D-023	P0	-	MEDIUM	V3	INLINE	zcode-p5
-T-E06-F01-001	PENDING	T-E04-F04-001	新建于 scripts/balance-sim.mjs	D-024,D-021,D-003	P1	-	MEDIUM	V2	INLINE	-
+T-E06-F01-001	PENDING	T-E04-F04-001	新建于 scripts/balance-sim.mjs	D-024,D-021,D-003	P1	READY	MEDIUM	V2	INLINE	-
 T-E06-F02-001	PENDING	T-E05-F04-001,T-E06-F01-001	docs/ 与 README.md	D-024	P1	-	LOW	V2	INLINE	-
 T-E06-F03-001	PENDING	T-E06-F02-001	git tag（本地）	D-024	P1	-	LOW	V1	REQUIRED	-

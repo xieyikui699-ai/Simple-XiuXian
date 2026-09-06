@@ -4,9 +4,9 @@
 // ③ 真元增长与突破判定（功法/聚灵丹/养气诀/战备长老增益接线；岗位占用者不修炼）
 // ④ 丹房/器坊点数与出炉（production.advanceWorkshops；旧档未启用生产时跳过以保持缺省口径）
 // ⑤ 历练与遭遇事件（方针=外出历练时 settleExpedition；报告落账：灵石/声望/士气/纪事/伤势/掉落/战报）
-// ⑥ NPC 宗门推进（E04-F02 接线点）
-// ⑦ 会战结算（E04-F04 接线点）
-// ⑧ 声望/士气落地与胜负判定（吞并/被吞并/凋敝由 E04-F04 接入）
+// ⑥ NPC 宗门推进（E04-F02 接线：advanceRivalSectMonthly 同帧推进 + NPC 宣战判定）
+// ⑦ 会战结算（E04-F03/F04 接线：宣战次月 runSectWar）
+// ⑧ 声望/士气落地与胜负判定（E04-F04：吞并/被吞并/凋敝终局 + 仙途评级）
 // ⑨ 第 12 月：年度衰老与坐化（长老随坐化自动卸任）
 // 纯函数：输入 GameState 返回新 GameState（内部 structuredClone），同输入恒同输出。
 import { getTechniqueById } from "./catalog.js";
@@ -21,17 +21,40 @@ import { deterministicRoll } from "./hash.js";
 import { effectiveDeathAge } from "./lifespan.js";
 import { advanceWorkshops } from "./production.js";
 import { nextRealmStage, realmLifespanBonusForLevel, realmStageForLevel } from "./realms.js";
+import {
+  WAR_COOLDOWN_MONTHS,
+  advanceRivalSectMonthly,
+  applyPrestigeDelta,
+  pickRivalOpponent,
+  prestigeDeltaForMajorBreakthrough,
+  rivalWarDecision,
+  rivalWarRollForTurn,
+  warCooldownEnded,
+} from "./rival.js";
 import { ROOT_MULTIPLIERS } from "./roots.js";
+import {
+  SECT_WAR_FIGHTERS,
+  type SectWarRecord,
+  type WarEligibleDisciple,
+  injuryMonthsLeftFor,
+  isWarEligible,
+  runSectWar,
+  sectWarRecord,
+  selectSectWarFighters,
+} from "./sect-war.js";
 import {
   DEVELOP_POLICY_EXTRA_INCOME_PER_OUTER,
   INNER_SALARY_PER_DISCIPLE,
   OUTER_INCOME_PER_DISCIPLE,
+  RECRUIT_COST,
 } from "./sect.js";
 import type {
   BreakthroughEvent,
   ChronicleEntry,
   DeathEvent,
   Disciple,
+  EndingKind,
+  EndingRating,
   GameState,
   MonthlyPolicy,
   PromotionEvent,
@@ -329,6 +352,7 @@ export function settleMonthly(
     const next = nextRealmStage(disciple.realmLevel);
     if (!next) {
       // 元婴前期圆满再突破 → 飞升结局。
+      state.totalBreakthroughs = (state.totalBreakthroughs ?? 0) + 1;
       appendChronicle(state, {
         turn,
         kind: "milestone",
@@ -339,6 +363,7 @@ export function settleMonthly(
         turn,
         text: `${state.sectName}门下 ${disciple.name} 飞升仙界，宗门就此名留仙史。`,
       };
+      applyEndingEvaluation(state, turn);
       breakthroughs.push({
         discipleId: disciple.id,
         discipleName: disciple.name,
@@ -351,6 +376,7 @@ export function settleMonthly(
     const previousBonus = realmLifespanBonusForLevel(disciple.realmLevel);
     disciple.realm = next.realm;
     disciple.realmLevel = next.level;
+    state.totalBreakthroughs = (state.totalBreakthroughs ?? 0) + 1;
     breakthroughs.push({
       discipleId: disciple.id,
       discipleName: disciple.name,
@@ -364,6 +390,17 @@ export function settleMonthly(
       kind: "milestone",
       text: `${disciple.name} 突破至${next.name}！`,
     });
+    // 大境界突破（进入 4/7/10 级）：声望 +3（设计 §声望）。
+    const majorPrestige = prestigeDeltaForMajorBreakthrough(next.level);
+    if (majorPrestige > 0) {
+      prestigeDelta += majorPrestige;
+      state.prestige = applyPrestigeDelta(state.prestige, majorPrestige);
+      appendChronicle(state, {
+        turn,
+        kind: "normal",
+        text: `${disciple.name} 迈入大境界（实力等级 ${next.level}），宗门声望 +${majorPrestige}。`,
+      });
+    }
     // 新境界寿元加成实时生效（差额累加）。
     const bonusDelta = realmLifespanBonusForLevel(disciple.realmLevel) - previousBonus;
     if (bonusDelta > 0) {
@@ -384,11 +421,18 @@ export function settleMonthly(
       state = advanceWorkshops(state).state;
     }
     if (policy === "explore" && !crisis) {
+      // 相遇接线（E04-F02）：缺省对手 = 真实 NPC 宗门确定性选将；宣战状态自 state 读取。
+      const rival = state.rival;
+      const opponentProvider: OpponentProvider =
+        options.opponentProvider ??
+        (rival
+          ? () => pickRivalOpponent(rival, `${state.seed}:rival-opponent:${turn}`, turn)
+          : () => undefined);
       expeditionReport = settleExpedition(state, {
         turn,
-        atWar: options.atWar ?? false,
+        atWar: options.atWar ?? state.warWithRival === true,
         incomePct: maxIncomePct(state),
-        opponentProvider: options.opponentProvider ?? (() => undefined),
+        opponentProvider,
         fighterProvider: options.fighterProvider,
       });
       const acc = { spiritStonesDelta, moraleDelta, prestigeDelta };
@@ -396,12 +440,212 @@ export function settleMonthly(
       spiritStonesDelta = acc.spiritStonesDelta;
       moraleDelta = acc.moraleDelta;
       prestigeDelta = acc.prestigeDelta;
+      // 对位弟子的战败伤势落回对手宗门名册（我方伤势由 applyExpeditionReport 落账；
+      // 战报 A=我方、B=对手：我方胜时败者为对手弟子）。
+      const battle = expeditionReport.battle;
+      const loserInjury = battle?.loserInjury;
+      if (
+        rival &&
+        battle?.winner === "A" &&
+        loserInjury &&
+        expeditionReport.opponentId !== undefined
+      ) {
+        const opponentId = expeditionReport.opponentId;
+        const rivalDisciple = rival.disciples.find((entry) => entry.id === opponentId);
+        if (rivalDisciple) {
+          rivalDisciple.injury = {
+            kind: loserInjury.kind === "heavy" ? "severe" : "light",
+            untilTurn: turn + loserInjury.months,
+          };
+        }
+      }
     }
   }
 
-  // ⑥ NPC 宗门推进（E04-F02 接线点）。
-  // ⑦ 会战结算（E04-F04 接线点）。
-  // ⑧ 声望/士气落地与胜负判定：声望/士气已随方针与历练落账；吞并/被吞并/凋敝判定由 E04-F04 接入。
+  // ⑥ NPC 宗门推进：与玩家月结同帧推进对手宗门（真元/突破/升阶/招募），并做 NPC 宣战判定。
+  let rivalDeclaredWar = false;
+  let rivalRankUp: { from: number; to: number } | undefined;
+  if (!state.ending && state.rival) {
+    const previousRank = state.rival.sectRank;
+    state.rival = advanceRivalSectMonthly(state.rival, turn);
+    if (state.rival.sectRank !== previousRank) {
+      rivalRankUp = { from: previousRank, to: state.rival.sectRank };
+      appendChronicle(state, {
+        turn,
+        kind: "milestone",
+        text: `情报：${state.rival.name} 晋升为${state.rival.sectRank === 2 ? "二" : "三"}级宗门！`,
+      });
+    }
+    // NPC 宣战判定：未开战且冷却已过时，声望差 >50 或其宗门等级更高 → 15%/月（sha256 掷骰）。
+    if (!state.warWithRival && warCooldownEnded(state)) {
+      const declared = rivalWarDecision({
+        roll: rivalWarRollForTurn(state.seed, turn),
+        prestigeGap: state.rival.prestige - state.prestige,
+        rivalLevelHigher: state.rival.sectRank > state.sectRank,
+      });
+      if (declared) {
+        state.warWithRival = true;
+        state.warDeclaredTurn = turn;
+        rivalDeclaredWar = true;
+        appendChronicle(state, {
+          turn,
+          kind: "warning",
+          text: `${state.rival.name} 向我宗宣战！来月会战，兵戎相见。`,
+        });
+      }
+    }
+  }
+
+  // ⑦ 会战结算（宣战次月触发）：选将 → 同序配对逐场 1v1 → 裁决 → 掠夺/声望/士气/伤势落账。
+  let warRecord: SectWarRecord | undefined;
+  if (
+    !state.ending &&
+    state.warWithRival &&
+    state.rival &&
+    state.warDeclaredTurn !== undefined &&
+    turn > state.warDeclaredTurn
+  ) {
+    const rival = state.rival;
+    const toWarEligible = (disciple: Disciple): WarEligibleDisciple => ({
+      ...disciple,
+      injuryMonthsLeft: injuryMonthsLeftFor(disciple, turn),
+    });
+    // 我方出战名单：warParty 指定优先（须可出战），不足自动按最强 3 补齐；缺省全自动选将。
+    const playerRoster = state.disciples.map(toWarEligible);
+    const rosterById = new Map(playerRoster.map((disciple) => [disciple.id, disciple]));
+    const party: WarEligibleDisciple[] = [];
+    for (const id of (state.warParty ?? []).slice(0, SECT_WAR_FIGHTERS)) {
+      const disciple = rosterById.get(id);
+      if (disciple && isWarEligible(disciple) && !party.some((entry) => entry.id === disciple.id)) {
+        party.push(disciple);
+      }
+    }
+    if (party.length < SECT_WAR_FIGHTERS) {
+      const autoFill = selectSectWarFighters(playerRoster).filter(
+        (disciple) => !party.some((entry) => entry.id === disciple.id),
+      );
+      party.push(...autoFill.slice(0, SECT_WAR_FIGHTERS - party.length));
+    }
+
+    const warResult = runSectWar({
+      playerFighters: party,
+      rivalFighters: rival.disciples.map(toWarEligible),
+      seed: state.seed,
+      playerStones: state.spiritStones,
+      rivalStones: rival.spiritStones,
+      turn,
+    });
+    const record = sectWarRecord(warResult, rival.name);
+
+    // 掠夺交割：胜方掠败方灵石 10%（≤5,000）。
+    if (warResult.winner === "player") {
+      state.spiritStones += warResult.plunder;
+      rival.spiritStones -= warResult.plunder;
+    } else {
+      state.spiritStones -= warResult.plunder;
+      rival.spiritStones += warResult.plunder;
+    }
+    // 声望/士气落地（我方 ±10/±5；对方对称）。
+    prestigeDelta += record.prestigeDelta;
+    state.prestige = applyPrestigeDelta(state.prestige, record.prestigeDelta);
+    moraleDelta += record.moraleDelta;
+    state.morale = Math.min(100, Math.max(0, state.morale + record.moraleDelta));
+    rival.prestige = applyPrestigeDelta(rival.prestige, record.rivalPrestigeDelta);
+    rival.morale = Math.min(100, Math.max(0, rival.morale + record.rivalMoraleDelta));
+
+    // 参战者按战败伤势规则落账（各场战报给出败方侧别与掷骰结果）。
+    const playerById = new Map(state.disciples.map((disciple) => [disciple.id, disciple]));
+    const rivalById = new Map(rival.disciples.map((disciple) => [disciple.id, disciple]));
+    for (const pair of warResult.pairOutcomes) {
+      if (!pair.loser) continue;
+      const target =
+        pair.loser.side === "player"
+          ? playerById.get(pair.loser.discipleId)
+          : rivalById.get(pair.loser.discipleId);
+      if (target) {
+        target.injury = {
+          kind: pair.loser.kind === "heavy" ? "severe" : "light",
+          untilTurn: turn + pair.loser.months,
+        };
+      }
+    }
+
+    // 会战记录与战报存档 + 纪事。
+    state.sectWars = [record, ...(state.sectWars ?? [])].slice(0, SECT_WAR_RECORD_LIMIT);
+    state.battles = [
+      ...warResult.pairOutcomes.map((pair) => pair.battle).reverse(),
+      ...(state.battles ?? []),
+    ].slice(0, BATTLE_LOG_LIMIT);
+    appendChronicle(state, {
+      turn,
+      kind: record.winner === "player" ? "milestone" : "warning",
+      text: record.summary,
+    });
+    for (const [index, pair] of warResult.pairOutcomes.entries()) {
+      const verdictText = pair.winner === "player" ? "胜" : pair.winner === "rival" ? "负" : "平";
+      appendChronicle(state, {
+        turn,
+        kind: "normal",
+        text: `会战第${index + 1}阵：${pair.playerFighterName} 对阵 ${pair.rivalFighterName}，${verdictText}。`,
+      });
+    }
+
+    // 战争状态收尾：进入 12 个月冷却（自宣战月起算），出战名单清空待下战重定。
+    state.warWithRival = false;
+    state.warCooldownEndsTurn = (state.warDeclaredTurn ?? turn) + WAR_COOLDOWN_MONTHS;
+    state.warDeclaredTurn = undefined;
+    state.warParty = undefined;
+    warRecord = record;
+  }
+
+  // ⑧ 声望/士气落地与胜负判定：声望/士气已随历练与会战落账；此处判吞并/被吞并/凋敝终局。
+  if (!state.ending) {
+    const rival = state.rival;
+    if (
+      rival &&
+      annexationTriggered({
+        myRank: state.sectRank,
+        rivalRank: rival.sectRank,
+        rivalPrestige: rival.prestige,
+      })
+    ) {
+      setOutcomeEnding(
+        state,
+        "annexation",
+        turn,
+        `${state.sectName} 压服${rival.name}：对方声望扫地、山门俯首，仙途霸业自此功成。`,
+      );
+    } else if (
+      rival &&
+      annexedTriggered({
+        myRank: state.sectRank,
+        rivalRank: rival.sectRank,
+        myPrestige: state.prestige,
+      })
+    ) {
+      setOutcomeEnding(
+        state,
+        "annexed",
+        turn,
+        `${rival.name} 大军压境：我宗声望扫地、群徒四散，宗门被吞并。`,
+      );
+    } else {
+      // 凋敝：内门 0 且灵石不足招募费连续 6 月（计数器落 state）。
+      state.bankruptStreak = declineStreakAfter({
+        streak: state.bankruptStreak ?? 0,
+        innerCount: state.disciples.filter((disciple) => disciple.role === "inner").length,
+        spiritStones: state.spiritStones,
+      });
+      if (isDeclineCollapse(state.bankruptStreak)) {
+        setOutcomeEnding(
+          state,
+          "bankrupt",
+          turn,
+          `${state.sectName} 内门零落、灵石耗竭，连续半年难以为继，宗门就此凋敝。`,
+        );
+      }
+    }
+  }
 
   // ⑨ 第 12 月：年度衰老与坐化。
   if (turn % 12 === 0) {
@@ -469,5 +713,155 @@ export function settleMonthly(
     promotions,
   };
   if (expeditionReport) result.expedition = expeditionReport;
+  if (warRecord) result.war = warRecord;
+  if (rivalDeclaredWar) result.rivalDeclaredWar = true;
+  if (rivalRankUp) result.rivalRankUp = rivalRankUp;
   return { state, result };
+}
+
+// ─── 结局落账与评价（E04-F04）────────────────────────────────────────────
+
+/** 会战记录存档上限（最新在前；控制快照体积）。 */
+export const SECT_WAR_RECORD_LIMIT = 20;
+
+/** 结局评价五维输入快照（设计 §胜负与结局评价：用时/突破/会战胜绩/坐化/剩余灵石）。 */
+function endingStatsOf(state: GameState, turn: number) {
+  return {
+    gameYears: Math.round((turn / 12) * 10) / 10,
+    breakthroughCount: state.totalBreakthroughs ?? 0,
+    warWins: (state.sectWars ?? []).filter((record) => record.winner === "player").length,
+    warTotal: (state.sectWars ?? []).length,
+    fallenCount: state.fallen.length,
+    spiritStonesLeft: state.spiritStones,
+  };
+}
+
+/** 为已写入的结局补算仙途评级与综合得分。 */
+function applyEndingEvaluation(state: GameState, turn: number): void {
+  if (!state.ending) return;
+  const stats = endingStatsOf(state, turn);
+  state.ending.rating = rateEnding(stats);
+  state.ending.score = endingScore(stats);
+}
+
+/** 吞并/被吞并/凋敝终局落账：写 ending + 评级 + 纪事里程碑。 */
+function setOutcomeEnding(state: GameState, kind: EndingKind, turn: number, text: string): void {
+  state.ending = { kind, turn, text };
+  applyEndingEvaluation(state, turn);
+  appendChronicle(state, {
+    turn,
+    kind: "milestone",
+    text: `${text}（仙途评级：${state.ending.rating ?? "丁"}）`,
+  });
+}
+
+// ─── 凋敝判定（设计 §胜负与结局评价：内门 0 且灵石不足招募费连续 6 月）──
+
+export const DECLINE_COLLAPSE_MONTHS = 6;
+
+export type DeclineStreakInput = {
+  /** 上月累计计数。 */
+  streak: number;
+  innerCount: number;
+  spiritStones: number;
+};
+
+/** 凋敝计数推进：内门 0 且灵石 < 招募费 → +1；任一条件解除即归零。 */
+export function declineStreakAfter(input: DeclineStreakInput): number {
+  const declining = input.innerCount === 0 && input.spiritStones < RECRUIT_COST;
+  return declining ? input.streak + 1 : 0;
+}
+
+/** 凋敝是否成局：连续计数 ≥ 6 月。 */
+export function isDeclineCollapse(streak: number): boolean {
+  return streak >= DECLINE_COLLAPSE_MONTHS;
+}
+
+// ─── 吞并/被吞并判定（对称：对方声望 ≤0 且我方宗门等级更高）────────────
+
+export type AnnexationInput = { myRank: number; rivalRank: number; rivalPrestige: number };
+
+/** 吞并胜利：对方声望 ≤0 且我方宗门等级更高。 */
+export function annexationTriggered(input: AnnexationInput): boolean {
+  return input.rivalPrestige <= 0 && input.myRank > input.rivalRank;
+}
+
+export type AnnexedInput = { myRank: number; rivalRank: number; myPrestige: number };
+
+/** 被吞并失局：我方声望 ≤0 且对方宗门等级更高。 */
+export function annexedTriggered(input: AnnexedInput): boolean {
+  return input.myPrestige <= 0 && input.rivalRank > input.myRank;
+}
+
+// ─── 仙途评级（甲/乙/丙/丁；五维输入 → 综合评分，阈值写死常量）─────────
+
+/** 结局评价阈值常量（设计 §胜负与结局评价 五维输入；分档为 E04-F04 定夺并写死）。 */
+export const ENDING_RATING_THRESHOLDS = {
+  /** 用时（游戏年）≤30 年得 3 分 / ≤60 年得 2 分 / 其余 1 分。 */
+  clearFastYears: 30,
+  clearSteadyYears: 60,
+  /** 突破总数 ≥25 次得 2 分 / ≥12 次得 1 分 / 其余 0 分。 */
+  breakthroughHigh: 25,
+  breakthroughMid: 12,
+  /** 会战胜率（有会战记录时）≥60% 得 2 分 / ≥40% 得 1 分 / 无会战 0 分。 */
+  warWinRateHighPct: 60,
+  warWinRateMidPct: 40,
+  /** 坐化弟子数 ≤2 人得 1 分 / 其余 0 分。 */
+  fallenCalm: 2,
+  /** 剩余灵石 ≥30,000 得 2 分 / ≥10,000 得 1 分 / 其余 0 分。 */
+  stonesHigh: 30000,
+  stonesMid: 10000,
+  /** 综合评分（满分 10）：≥8 甲 / ≥6 乙 / ≥4 丙 / 其余 丁。 */
+  scoreJia: 8,
+  scoreYi: 6,
+  scoreBing: 4,
+  scoreMax: 10,
+} as const;
+
+export type EndingStatsInput = {
+  /** 用时（游戏年）。 */
+  gameYears: number;
+  /** 突破成功总次数（含飞升）。 */
+  breakthroughCount: number;
+  warWins: number;
+  warTotal: number;
+  /** 坐化弟子数。 */
+  fallenCount: number;
+  /** 剩余灵石。 */
+  spiritStonesLeft: number;
+};
+
+/** 结局综合评分（0–10；口径见 ENDING_RATING_THRESHOLDS 注释）。 */
+export function endingScore(input: EndingStatsInput): number {
+  const t = ENDING_RATING_THRESHOLDS;
+  let score = 0;
+  if (input.gameYears <= t.clearFastYears) score += 3;
+  else if (input.gameYears <= t.clearSteadyYears) score += 2;
+  else score += 1;
+
+  if (input.breakthroughCount >= t.breakthroughHigh) score += 2;
+  else if (input.breakthroughCount >= t.breakthroughMid) score += 1;
+
+  if (input.warTotal > 0) {
+    const winRatePct = (input.warWins / input.warTotal) * 100;
+    if (winRatePct >= t.warWinRateHighPct) score += 2;
+    else if (winRatePct >= t.warWinRateMidPct) score += 1;
+  }
+
+  if (input.fallenCount <= t.fallenCalm) score += 1;
+
+  if (input.spiritStonesLeft >= t.stonesHigh) score += 2;
+  else if (input.spiritStonesLeft >= t.stonesMid) score += 1;
+
+  return Math.min(score, t.scoreMax);
+}
+
+/** 仙途评级：综合评分 → 甲/乙/丙/丁（纯函数、确定性）。 */
+export function rateEnding(input: EndingStatsInput): EndingRating {
+  const score = endingScore(input);
+  const t = ENDING_RATING_THRESHOLDS;
+  if (score >= t.scoreJia) return "甲";
+  if (score >= t.scoreYi) return "乙";
+  if (score >= t.scoreBing) return "丙";
+  return "丁";
 }

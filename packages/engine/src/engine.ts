@@ -11,9 +11,12 @@ import {
   getSpellById,
   getTechniqueById,
 } from "./catalog.js";
+import { combatReadyDisciples } from "./expedition.js";
 import { generateDisciple } from "./generation.js";
 import { ADULT_AGE } from "./production.js";
 import { realmLifespanBonusForLevel, realmStageForLevel } from "./realms.js";
+import { canPlayerDeclareWar, createRivalSect, declareWar } from "./rival.js";
+import { SECT_WAR_FIGHTERS } from "./sect-war.js";
 import {
   INITIAL_INNER_DISCIPLES,
   INITIAL_MORALE,
@@ -33,6 +36,10 @@ import type { ChronicleEntry, Disciple, GameState, RecruitmentCandidate } from "
 export type CreateGameInput = {
   seed: string;
   sectName: string;
+  /** NPC 对手宗门名（缺省按 seed 确定性选取）。 */
+  rivalName?: string;
+  /** NPC 难度倍率（0.8 / 1 / 1.2，缺省 1）。 */
+  rivalDifficulty?: number;
 };
 
 export function createGame(input: CreateGameInput): GameState {
@@ -93,6 +100,14 @@ export function createGame(input: CreateGameInput): GameState {
     usedNames.push(disciple.name);
     state.disciples.push(disciple);
   }
+
+  // NPC 对手宗门：与玩家同 seed 确定性生成，开局同为 1 级宗门（设计 §NPC 对手宗门）。
+  state.rival = createRivalSect({
+    seed: state.seed,
+    name: input.rivalName,
+    difficulty: input.rivalDifficulty ?? 1,
+  });
+  state.sectWars = [];
   return state;
 }
 
@@ -387,4 +402,58 @@ export function discipleCultivationView(state: Readonly<GameState>, disciple: Di
     successRate: currentSuccessRate(disciple, stage.baseSuccessRate),
     realmLifespanBonus: realmLifespanBonusForLevel(disciple.realmLevel),
   };
+}
+
+// ─── M3 两宗对抗命令：会战出战名单 / 宣战 ────────────────────────────────
+
+export type SetWarPartyOutcome = {
+  state: GameState;
+  discipleIds: string[];
+};
+
+/** 指定会战出战弟子（至多 3 名，须为可出战内门；清空传空数组即恢复自动选将）。 */
+export function setWarParty(
+  stateInput: Readonly<GameState>,
+  discipleIds: readonly string[],
+): SetWarPartyOutcome {
+  if (stateInput.ending) throw new Error("game_already_ended");
+  const unique = [...new Set(discipleIds)];
+  if (unique.length > SECT_WAR_FIGHTERS) throw new Error("war_party_too_large");
+  const readyIds = new Set(
+    combatReadyDisciples(stateInput, stateInput.currentTurn).map((d) => d.id),
+  );
+  for (const id of unique) {
+    if (!readyIds.has(id)) throw new Error("war_party_disciple_unavailable");
+  }
+  const state = structuredClone(stateInput) as GameState;
+  state.warParty = unique;
+  const names = unique
+    .map((id) => state.disciples.find((disciple) => disciple.id === id)?.name)
+    .filter((name): name is string => name !== undefined);
+  state.chronicle.unshift({
+    turn: state.currentTurn,
+    kind: "normal",
+    text:
+      names.length > 0
+        ? `会战出战名单已定：${names.join("、")}。`
+        : "会战出战名单已清空，届时自动选派最强弟子。",
+  });
+  return { state, discipleIds: unique };
+}
+
+export type DeclareWarOutcome = {
+  state: GameState;
+  /** 宣战是否成立（冷却期/已开战时拒绝并抛错，故恒为 true；保留字段便于 UI 判定展示）。 */
+  canDeclare: boolean;
+};
+
+/** 玩家宣战（随时可宣，冷却期拒绝；宣战次月月结触发会战）。 */
+export function playerDeclareWar(stateInput: Readonly<GameState>): DeclareWarOutcome {
+  if (!canPlayerDeclareWar(stateInput)) {
+    if (stateInput.ending) throw new Error("game_already_ended");
+    if (stateInput.warWithRival) throw new Error("war_already_declared");
+    if (!stateInput.rival) throw new Error("rival_missing");
+    throw new Error("war_cooldown_active");
+  }
+  return { state: declareWar(stateInput), canDeclare: true };
 }

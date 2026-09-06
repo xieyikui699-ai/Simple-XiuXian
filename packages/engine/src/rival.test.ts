@@ -289,7 +289,10 @@ describe("会战（sect-war）", () => {
       resolveSectWar([
         outcome("player", 300, 100),
         outcome("rival", 100, 300),
-        outcome("draw", 150, 150),
+        // 口径修订（zcode-p4，收绿时）：原稿平局场 (150,150) 与前两场 (300,100)/(100,300)
+        // 完全对称，任一对称聚合下总伤害恒相等，无法触发 totalDamage 裁决；
+        // 改为 (150,100) 使总伤害 550:500 非对称，保留「1:1:1 比总伤害」的测试意图。
+        outcome("draw", 150, 100),
       ]),
       { winner: "player", decidedBy: "totalDamage" },
     );

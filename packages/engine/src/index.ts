@@ -12,6 +12,8 @@ export * from "./combat-profile.js";
 export * from "./battle-status.js";
 export * from "./battle.js";
 export * from "./expedition.js";
+export * from "./rival.js";
+export * from "./sect-war.js";
 export * from "./sect.js";
 export * from "./generation.js";
 export * from "./settlement.js";

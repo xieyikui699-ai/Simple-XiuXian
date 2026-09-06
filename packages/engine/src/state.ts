@@ -4,8 +4,8 @@ import type { DiscipleAttributes } from "./attributes.js";
 import type { BattleReport } from "./battle.js";
 import type { CraftJobKind, EquippedGear, GearSlot, GearTier } from "./catalog.js";
 import type { ExpeditionReport } from "./expedition.js";
-import type { RootElement, RootType } from "./roots.js";
 import type { RivalSect } from "./rival.js";
+import type { RootElement, RootType } from "./roots.js";
 import type { SectWarRecord } from "./sect-war.js";
 
 export type DiscipleRole = "inner" | "outer";
