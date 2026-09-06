@@ -147,7 +147,9 @@ describe("月度结算", () => {
       Math.max(1, disciple.attributes.comprehension + flat.comprehension),
     );
     const expected = Math.round(
-      (ZHENYUAN_BASE + comprehension * ZHENYUAN_COMPREHENSION_COEFF) * ROOT_MULTIPLIERS[disciple.rootType] * 1.1,
+      (ZHENYUAN_BASE + comprehension * ZHENYUAN_COMPREHENSION_COEFF) *
+        ROOT_MULTIPLIERS[disciple.rootType] *
+        1.1,
     );
     assert.equal(monthlyZhenyuanGain(state, disciple), expected);
   });

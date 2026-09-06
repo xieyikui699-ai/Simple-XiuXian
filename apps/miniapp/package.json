@@ -11,11 +11,7 @@
     "test": "esbuild src/store/game-store.test.ts --bundle --format=esm --platform=node --external:@simple-xiuxian/engine --outfile=dist-test/game-store.test.mjs && node --test dist-test/game-store.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "browserslist": [
-    "last 3 versions",
-    "Android >= 4.1",
-    "ios >= 8"
-  ],
+  "browserslist": ["last 3 versions", "Android >= 4.1", "ios >= 8"],
   "dependencies": {
     "@babel/runtime": "^7.24.4",
     "@simple-xiuxian/engine": "workspace:*",

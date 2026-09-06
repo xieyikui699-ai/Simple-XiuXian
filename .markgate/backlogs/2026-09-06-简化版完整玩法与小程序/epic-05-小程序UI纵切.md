@@ -49,6 +49,7 @@
 - 授权边界：INLINE（仓库内实现）
 - 执行者：zcode-p5
 - 完成证据（部分）：纪事页（三色分列，最新在前）与结局页（飞升结局文案+仙途总览+开新局入口）已落地可用；构建/typecheck/biome 绿。丹房器坊/仓库/对手情报页已建路由与说明占位（目录与生产核心 E02-F01/F02 已被并行波次合入，页面接入待 E02-F03 管理命令；对手/会战依赖 E04）；战斗条目分色回放、吞并/凋敝结局与甲乙丙丁评级待对应引擎波次合入后补全。**未满足项**：一场会战三份战报回放、结局评级正确显示（阻塞于 E01/E04 波次，非 UI 侧问题）。
+- 验收补记（zcode-p6，2026-09-07）：E04 波次已全部合入后复查，丹房器坊/仓库/对手情报四页仍为占位路由（35–48 行级别，未引用 assignWorkshopJob/startPillCraft/wearGear/usePill/declareWar，纪事页未消费 `state.battles` 回放）；`pnpm --filter @simple-xiuxian/miniapp build/typecheck/test` 全绿。页面接线余量如实留待后续波次。
 
 ### T-E05-F04-001 真机验证与体验版准备
 - 状态：IN_PROGRESS
@@ -65,3 +66,4 @@
 - 授权边界：INLINE（仓库内实现与本地工具链）
 - 执行者：zcode-p5
 - 完成证据（部分）：apps/miniapp/README.md 已写入：DevTools 导入步骤（touristappid 测试号）、真机旅程清单、体验版打包说明、体积实测（weapp 产物 390,293 字节；120 月快照 16,319 字节 < 100KB 上限，弟子 23/纪事 127）。`pnpm --filter @simple-xiuxian/miniapp typecheck/test/build` 全绿。**未满足项**：本机未安装微信开发者工具，且 DevTools 登录/真机扫码需用户本人操作——DevTools 导入运行与真机旅程留证待用户执行；`pnpm validate` 全仓绿受并行 P1/P2 波次在途改动影响（E00 红测已收口、E01 实现中），全量回归以各波次收口后为准。
+- 验收补记（zcode-p6，2026-09-07）：自动可验部分已完成——`pnpm validate` 全仓退出 0（引擎 164 + store 11）；快照体积回归已回修（`state.battles` 字节预算 45KB/30 条，120 月快照 75,835 字节 < 102,400 上限）；README 打包说明已具备。DevTools 导入与真机旅程留证仍待用户执行。
