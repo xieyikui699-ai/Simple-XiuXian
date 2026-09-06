@@ -118,6 +118,12 @@ describe("NPC 月度运行时（rival，确定性）", () => {
   it("内门真元按玩家同公式 ×难度（1.0/0.8/1.2，四舍五入）", () => {
     for (const difficulty of [1, 0.8, 1.2] as const) {
       const rival = createRivalSect({ seed: "rival-golden", name: "玄阴宗", difficulty });
+      // 调平后首月真元即超 1 级需求，会触发突破清零；把内门抬到筑基后期（需求 5,000）观察净增。
+      for (const disciple of rival.disciples) {
+        if (disciple.role !== "inner") continue;
+        disciple.realmLevel = 6;
+        disciple.realm = realmStageForLevel(6).realm;
+      }
       const advanced = advanceRivalSectMonthly(rival, 2);
       for (const disciple of advanced.disciples) {
         if (disciple.role !== "inner") continue;

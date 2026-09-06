@@ -130,6 +130,10 @@ export type SettleMonthlyOptions = {
   atWar?: boolean;
 };
 
+/** 月真元基准常量（调平旋钮，E06-F01）：base = ZHENYUAN_BASE + 悟性 × ZHENYUAN_COMPREHENSION_COEFF。 */
+export const ZHENYUAN_BASE = 130;
+export const ZHENYUAN_COMPREHENSION_COEFF = 0.5;
+
 export function monthlyZhenyuanGain(state: GameState, disciple: Disciple): number {
   // 有效五维（基础 + 天赋 + 功法 + 装备平加，clamp 后）由 combat-profile 统一聚合。
   const comprehension = buildCombatProfile(disciple).breakdown.attributes.effective.comprehension;
@@ -143,7 +147,7 @@ export function monthlyZhenyuanGain(state: GameState, disciple: Disciple): numbe
   const techniquePct = disciple.techniqueId
     ? (getTechniqueById(disciple.techniqueId)?.effect.zhenyuanPct ?? 0)
     : 0;
-  const base = 10 + comprehension * 0.1;
+  const base = ZHENYUAN_BASE + comprehension * ZHENYUAN_COMPREHENSION_COEFF;
   const rate = 1 + talentsZhenyuanPct(disciple.talentIds) + techniquePct + moralePct + policyPct;
   const gain = Math.round(base * ROOT_MULTIPLIERS[disciple.rootType] * rate);
   const focusUntil = disciple.spiritFocusUntilTurn;

@@ -23,6 +23,8 @@ import { ROOT_MULTIPLIERS } from "./roots.js";
 import {
   BATTLE_LOG_BYTE_BUDGET,
   BATTLE_LOG_LIMIT,
+  ZHENYUAN_BASE,
+  ZHENYUAN_COMPREHENSION_COEFF,
   currentSuccessRate,
   monthlyZhenyuanGain,
   prependBattleReports,
@@ -145,7 +147,7 @@ describe("月度结算", () => {
       Math.max(1, disciple.attributes.comprehension + flat.comprehension),
     );
     const expected = Math.round(
-      (10 + comprehension * 0.1) * ROOT_MULTIPLIERS[disciple.rootType] * 1.1,
+      (ZHENYUAN_BASE + comprehension * ZHENYUAN_COMPREHENSION_COEFF) * ROOT_MULTIPLIERS[disciple.rootType] * 1.1,
     );
     assert.equal(monthlyZhenyuanGain(state, disciple), expected);
   });
@@ -341,10 +343,10 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
     const before = monthlyZhenyuanGain(state, disciple);
     const { state: after } = learnArt(state, "d-1", "tech-hunyuan");
     const learned = discipleOf(after, "d-1");
-    // 设计公式：base = 10 + 有效悟性×0.1；rate = 1 + 天赋% + 功法 0.15（士气中段无加成）。
+    // 设计公式：base = ZHENYUAN_BASE + 有效悟性×COEFF；rate = 1 + 天赋% + 功法 0.15（士气中段无加成）。
     const effective = buildCombatProfile(learned).breakdown.attributes.effective;
     const expected = Math.round(
-      (10 + effective.comprehension * 0.1) *
+      (ZHENYUAN_BASE + effective.comprehension * ZHENYUAN_COMPREHENSION_COEFF) *
         ROOT_MULTIPLIERS[learned.rootType] *
         (1 + talentsZhenyuanPct(learned.talentIds) + 0.15),
     );
