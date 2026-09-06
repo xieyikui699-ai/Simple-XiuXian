@@ -1,0 +1,19 @@
+{
+  "name": "simple-xiuxian",
+  "private": true,
+  "version": "0.1.0",
+  "description": "《掌门，不好了》小程序简化版：两宗对抗的文字修仙经营游戏",
+  "packageManager": "pnpm@10.6.2",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "biome check .",
+    "validate": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@types/node": "22.15.3",
+    "typescript": "5.8.3"
+  }
+}
