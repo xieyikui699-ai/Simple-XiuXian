@@ -1,10 +1,23 @@
 // 游戏状态类型：唯一事实源是 GameState 快照，UI 层负责持久化（小程序本地存储）。
 // M2 扩展字段（library/jobs/warehouse、弟子功法法术装备）均为可选：旧档缺字段时按空值口径兼容。
 import type { DiscipleAttributes } from "./attributes.js";
+import type { BattleReport } from "./battle.js";
 import type { CraftJobKind, EquippedGear, GearSlot, GearTier } from "./catalog.js";
+import type { ExpeditionReport } from "./expedition.js";
 import type { RootElement, RootType } from "./roots.js";
+import type { RivalSect } from "./rival.js";
+import type { SectWarRecord } from "./sect-war.js";
 
 export type DiscipleRole = "inner" | "outer";
+
+/** 伤势档位：轻伤禁战 1 月 / 重伤禁战 3 月（与 battle.ts 战败伤势同词汇表）。 */
+export type InjuryKind = "light" | "severe";
+
+/** 伤势：untilTurn 当回目（含）仍禁战，下一回目起可出战；休养方针恢复月数 −2。 */
+export type Injury = {
+  kind: InjuryKind;
+  untilTurn: number;
+};
 
 export type Disciple = {
   id: string;
@@ -29,6 +42,10 @@ export type Disciple = {
   spellIds?: string[];
   /** 已穿戴装备（槽位 → 档位；旧档缺省 = 空）。 */
   equippedGear?: EquippedGear;
+  /** 聚灵丹增益：该回目（含）之前真元获取 ×1.5；重复服用只刷新时长不叠加。 */
+  spiritFocusUntilTurn?: number;
+  /** 未愈伤势；缺省 = 无伤（旧档兼容）。 */
+  injury?: Injury;
 };
 
 export type MonthlyPolicy = "cultivate" | "develop" | "explore" | "rest";
@@ -50,10 +67,17 @@ export type ChronicleEntry = {
 
 export type EndingKind = "ascension" | "annexation" | "annexed" | "bankrupt";
 
+/** 仙途评级四档（设计 §胜负与结局评价；阈值见 settlement.ENDING_RATING_THRESHOLDS）。 */
+export type EndingRating = "甲" | "乙" | "丙" | "丁";
+
 export type GameEnding = {
   kind: EndingKind;
   turn: number;
   text: string;
+  /** 仙途评级（E04-F04 结局评价；M1 旧档缺省）。 */
+  rating?: EndingRating;
+  /** 综合得分（满分 10）。 */
+  score?: number;
 };
 
 export type FallenDisciple = {
@@ -101,6 +125,13 @@ export type WarehouseStock = {
   pills: Array<{ pillId: string; count: number }>;
 };
 
+/** 长老任命（各至多 1 名，从无职成年内门弟子任命，可替换、旧长老自动卸任）：
+ * 资源长老外门供奉 +20%、战备长老全门突破率 +3；长老不战斗不修炼。 */
+export type SectElders = {
+  resource?: string;
+  war?: string;
+};
+
 export type GameState = {
   seed: string;
   sectName: string;
@@ -124,6 +155,26 @@ export type GameState = {
   jobs?: SectJobs;
   /** 仓库（旧档缺省为空）。 */
   warehouse?: WarehouseStock;
+  /** 长老任命（旧档缺省为无长老）。 */
+  elders?: SectElders;
+  /** 战报存档（最新在前，月结接线时裁剪上限；UI 回放直接消费）。 */
+  battles?: BattleReport[];
+  /** NPC 对手宗门快照（与玩家月结同帧推进；旧档缺省 = 未启用对手）。 */
+  rival?: RivalSect;
+  /** 战争状态：任一方宣战后至会战结算前为 true。 */
+  warWithRival?: boolean;
+  /** 宣战发生的回目（会战于次月月结第 ⑦ 步触发）。 */
+  warDeclaredTurn?: number;
+  /** 冷却结束回目（≥ 该回目方可再次宣战；自宣战月起算 12 个月）。 */
+  warCooldownEndsTurn?: number;
+  /** 玩家指定的会战出战弟子 id（至多 3；缺省自动选最强 3）。 */
+  warParty?: string[];
+  /** 会战记录（最新在前；UI 会战记录页消费）。 */
+  sectWars?: SectWarRecord[];
+  /** 凋敝计数：内门 0 且灵石不足招募费的连续月数（≥6 触发凋敝结局）。 */
+  bankruptStreak?: number;
+  /** 突破成功总次数（含飞升；结局评价输入）。 */
+  totalBreakthroughs?: number;
 };
 
 export function emptyWorkshop(): WorkshopState {
@@ -184,4 +235,12 @@ export type SettlementResult = {
   breakthroughs: BreakthroughEvent[];
   deaths: DeathEvent[];
   promotions: PromotionEvent[];
+  /** 方针=外出历练时的遭遇事件报告（第 5 步；其余方针缺省）。 */
+  expedition?: ExpeditionReport;
+  /** 会战结算记录（第 7 步触发时携带）。 */
+  war?: SectWarRecord;
+  /** 第 6 步 NPC 推进是否发生宣战（供 UI 提示）。 */
+  rivalDeclaredWar?: boolean;
+  /** 第 6 步 NPC 宗门是否升阶（供 UI 提示）。 */
+  rivalRankUp?: { from: number; to: number };
 };

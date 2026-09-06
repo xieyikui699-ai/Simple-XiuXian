@@ -1,4 +1,18 @@
+// 引擎门面：开局、月结、招募、提拔、升阶 + M2 管理命令（研读功法法术/穿戴装备/服用丹药/任命长老）。
+// 所有操作返回新状态（纯函数、确定性）；每条管理命令落纪事 normal 一条。
+import {
+  GEAR_SLOT_DISPLAY_NAMES,
+  type GearSlot,
+  type GearTier,
+  MAX_SPELLS_PER_DISCIPLE,
+  canLearnSpell,
+  getGear,
+  getPillById,
+  getSpellById,
+  getTechniqueById,
+} from "./catalog.js";
 import { generateDisciple } from "./generation.js";
+import { ADULT_AGE } from "./production.js";
 import { realmLifespanBonusForLevel, realmStageForLevel } from "./realms.js";
 import {
   INITIAL_INNER_DISCIPLES,
@@ -13,9 +27,8 @@ import {
   upgradeRequirementFor,
 } from "./sect.js";
 import { currentSuccessRate, monthlyZhenyuanGain } from "./settlement.js";
-// 引擎门面：开局、月结、招募、提拔、升阶。所有操作返回新状态（纯函数、确定性）。
 import { emptyLibrary, emptySectJobs, emptyWarehouse } from "./state.js";
-import type { Disciple, GameState, RecruitmentCandidate } from "./state.js";
+import type { ChronicleEntry, Disciple, GameState, RecruitmentCandidate } from "./state.js";
 
 export type CreateGameInput = {
   seed: string;
@@ -170,6 +183,198 @@ export function upgradeSect(stateInput: Readonly<GameState>): UpgradeOutcome {
     text: `${state.sectName} 晋升为${state.sectRank === 2 ? "二" : "三"}级宗门，山门气象一新！`,
   });
   return { state, newRank: state.sectRank };
+}
+
+// ─── M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / 任命长老 ──────────
+
+function appendChronicle(state: GameState, entry: ChronicleEntry): void {
+  state.chronicle.unshift(entry);
+}
+
+export type LearnArtOutcome = {
+  state: GameState;
+  disciple: Disciple;
+};
+
+/** 研读功法/法术：藏经阁拥有方可研读（不耗书）；功法限 1 门、法术限 2 门。 */
+export function learnArt(
+  stateInput: Readonly<GameState>,
+  discipleId: string,
+  artId: string,
+): LearnArtOutcome {
+  if (stateInput.ending) throw new Error("game_already_ended");
+  const disciple = stateInput.disciples.find((entry) => entry.id === discipleId);
+  if (!disciple) throw new Error("disciple_not_found");
+  if (disciple.role !== "inner") throw new Error("disciple_not_inner");
+  const library = stateInput.library ?? emptyLibrary();
+  let plan: { kind: "technique"; name: string } | { kind: "spell"; name: string };
+  const technique = getTechniqueById(artId);
+  const spell = getSpellById(artId);
+  if (technique) {
+    if (!library.techniqueIds.includes(artId)) throw new Error("art_not_in_library");
+    if (disciple.techniqueId) throw new Error("technique_limit_reached");
+    plan = { kind: "technique", name: technique.name };
+  } else if (spell) {
+    const known = disciple.spellIds ?? [];
+    if (known.includes(artId)) throw new Error("spell_already_learned");
+    if (!canLearnSpell(library.spellIds, artId, known.length)) {
+      throw new Error(
+        library.spellIds.includes(artId) ? "spell_limit_reached" : "art_not_in_library",
+      );
+    }
+    plan = { kind: "spell", name: spell.name };
+  } else {
+    // 目录中既无功法亦无法术。
+    throw new Error("art_not_found");
+  }
+  const state = structuredClone(stateInput) as GameState;
+  const target = state.disciples.find((entry) => entry.id === discipleId) as Disciple;
+  if (plan.kind === "technique") {
+    target.techniqueId = artId;
+    appendChronicle(state, {
+      turn: state.currentTurn,
+      kind: "normal",
+      text: `${target.name} 研读功法《${plan.name}》，气机渐入门径。`,
+    });
+  } else {
+    target.spellIds = [...(target.spellIds ?? []), artId].slice(0, MAX_SPELLS_PER_DISCIPLE);
+    appendChronicle(state, {
+      turn: state.currentTurn,
+      kind: "normal",
+      text: `${target.name} 修习法术《${plan.name}》，指下灵光初成。`,
+    });
+  }
+  return { state, disciple: target };
+}
+
+export type WearGearOutcome = {
+  state: GameState;
+  disciple: Disciple;
+};
+
+/** 穿戴装备：从仓库取同槽同档一件戴上；原槽位装备卸下回仓（固定数值无实例差异）。 */
+export function wearGear(
+  stateInput: Readonly<GameState>,
+  discipleId: string,
+  slot: GearSlot,
+  tier: GearTier,
+): WearGearOutcome {
+  if (stateInput.ending) throw new Error("game_already_ended");
+  const disciple = stateInput.disciples.find((entry) => entry.id === discipleId);
+  if (!disciple) throw new Error("disciple_not_found");
+  if (disciple.role !== "inner") throw new Error("disciple_not_inner");
+  if (!getGear(slot, tier)) throw new Error("gear_invalid");
+  const warehouse = stateInput.warehouse ?? emptyWarehouse();
+  const stockIndex = warehouse.gear.findIndex((item) => item.slot === slot && item.tier === tier);
+  if (stockIndex < 0) throw new Error("gear_not_in_warehouse");
+  const state = structuredClone(stateInput) as GameState;
+  const target = state.disciples.find((entry) => entry.id === discipleId) as Disciple;
+  const stock = state.warehouse ?? emptyWarehouse();
+  state.warehouse = stock;
+  stock.gear.splice(stockIndex, 1);
+  const previousTier = target.equippedGear?.[slot];
+  if (previousTier !== undefined) stock.gear.push({ slot, tier: previousTier });
+  target.equippedGear = { ...(target.equippedGear ?? {}), [slot]: tier };
+  appendChronicle(state, {
+    turn: state.currentTurn,
+    kind: "normal",
+    text: `${target.name} 佩上${GEAR_SLOT_DISPLAY_NAMES[slot]}（档${tier}）${previousTier !== undefined ? "，原装备卸下回仓" : ""}。`,
+  });
+  return { state, disciple: target };
+}
+
+export type UsePillOutcome = {
+  state: GameState;
+  disciple: Disciple;
+};
+
+/** 服用丹药：延寿丹最大寿命 +10；聚灵丹 12 月内真元 ×1.5（不叠加、刷新时长）。 */
+export function usePill(
+  stateInput: Readonly<GameState>,
+  discipleId: string,
+  pillId: string,
+): UsePillOutcome {
+  if (stateInput.ending) throw new Error("game_already_ended");
+  const pill = getPillById(pillId);
+  if (!pill) throw new Error("pill_not_found");
+  const disciple = stateInput.disciples.find((entry) => entry.id === discipleId);
+  if (!disciple) throw new Error("disciple_not_found");
+  const warehouse = stateInput.warehouse ?? emptyWarehouse();
+  const stockEntry = warehouse.pills.find((entry) => entry.pillId === pillId);
+  if (!stockEntry || stockEntry.count <= 0) throw new Error("pill_not_in_warehouse");
+  const state = structuredClone(stateInput) as GameState;
+  const target = state.disciples.find((entry) => entry.id === discipleId) as Disciple;
+  const stock = state.warehouse ?? emptyWarehouse();
+  state.warehouse = stock;
+  const stored = stock.pills.find((entry) => entry.pillId === pillId);
+  if (stored) {
+    stored.count -= 1;
+    if (stored.count <= 0) {
+      stock.pills = stock.pills.filter((entry) => entry.pillId !== pillId);
+    }
+  }
+  if (pill.effect.lifespanFlat !== undefined) {
+    target.maxLifespan += pill.effect.lifespanFlat;
+    appendChronicle(state, {
+      turn: state.currentTurn,
+      kind: "normal",
+      text: `${target.name} 服用${pill.name}，寿元绵长（最大寿命 +${pill.effect.lifespanFlat} 年）。`,
+    });
+  }
+  if (pill.effect.zhenyuanBuff) {
+    target.spiritFocusUntilTurn = state.currentTurn + pill.effect.zhenyuanBuff.months;
+    appendChronicle(state, {
+      turn: state.currentTurn,
+      kind: "normal",
+      text: `${target.name} 服用${pill.name}，${pill.effect.zhenyuanBuff.months} 月内真元获取 ×1.5（重复服用只刷新时长）。`,
+    });
+  }
+  return { state, disciple: target };
+}
+
+export type ElderKind = "resource" | "war";
+
+export type AppointElderOutcome = {
+  state: GameState;
+  disciple: Disciple;
+  /** 被替换卸任的旧长老（无则缺省）。 */
+  replacedDiscipleId?: string;
+};
+
+/** 任命长老：资源长老（外门供奉 +20%）/ 战备长老（全门突破率 +3），各至多 1 名，可替换（旧长老卸任）。 */
+export function appointElder(
+  stateInput: Readonly<GameState>,
+  discipleId: string,
+  kind: ElderKind,
+): AppointElderOutcome {
+  if (stateInput.ending) throw new Error("game_already_ended");
+  const disciple = stateInput.disciples.find((entry) => entry.id === discipleId);
+  if (!disciple) throw new Error("disciple_not_found");
+  if (disciple.role !== "inner") throw new Error("disciple_not_inner");
+  if (disciple.age < ADULT_AGE) throw new Error("disciple_not_adult");
+  const jobs = stateInput.jobs ?? emptySectJobs();
+  for (const workshopKind of ["pill", "gear"] as const) {
+    if (jobs[workshopKind].workers.includes(discipleId)) throw new Error("disciple_job_busy");
+  }
+  const current = stateInput.elders ?? {};
+  if (current[kind] === discipleId) {
+    // 幂等连任：状态不变。
+    return { state: structuredClone(stateInput) as GameState, disciple };
+  }
+  const other = kind === "resource" ? current.war : current.resource;
+  if (other === discipleId) throw new Error("disciple_job_busy");
+  const state = structuredClone(stateInput) as GameState;
+  const target = state.disciples.find((entry) => entry.id === discipleId) as Disciple;
+  const replaced = kind === "resource" ? state.elders?.resource : state.elders?.war;
+  state.elders = { ...(state.elders ?? {}), [kind]: discipleId };
+  const elderName = kind === "resource" ? "资源长老" : "战备长老";
+  const elderEffect = kind === "resource" ? "外门供奉 +20%" : "全门突破成功率 +3";
+  appendChronicle(state, {
+    turn: state.currentTurn,
+    kind: "normal",
+    text: `${target.name} 就任${elderName}（${elderEffect}），自此不问战修、专司其职。`,
+  });
+  return { state, disciple: target, replacedDiscipleId: replaced };
 }
 
 /** 派生展示：弟子修炼视图（只读，不写状态）。 */
