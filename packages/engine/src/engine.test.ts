@@ -2,6 +2,7 @@
 // M2 追加：研读功法法术 / 穿戴装备 / 服用丹药 / 任命长老（E02-F03）。
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { BattleReport } from "./battle.js";
 import { buildCombatProfile } from "./combat-profile.js";
 import {
   appointElder,
@@ -19,7 +20,14 @@ import { deterministicRoll } from "./hash.js";
 import { assignWorkshopJob } from "./production.js";
 import { realmStageForLevel } from "./realms.js";
 import { ROOT_MULTIPLIERS } from "./roots.js";
-import { currentSuccessRate, monthlyZhenyuanGain, settleMonthly } from "./settlement.js";
+import {
+  BATTLE_LOG_BYTE_BUDGET,
+  BATTLE_LOG_LIMIT,
+  currentSuccessRate,
+  monthlyZhenyuanGain,
+  prependBattleReports,
+  settleMonthly,
+} from "./settlement.js";
 import type { GameState, SettlementResult } from "./state.js";
 import { talentsAttributeFlat, talentsZhenyuanPct } from "./talents.js";
 
@@ -483,5 +491,58 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
     assert.equal(successEvent.outcome, "success");
     assert.equal(successEvent.successRate, found.rate0 + 3);
     assert.equal(discipleOf(withElder.state, "d-2").realmLevel, 7);
+  });
+});
+
+describe("战报存档预算（快照 <100KB 约束，设计 D-022）", () => {
+  const bigReport = (index: number): BattleReport => ({
+    seed: `report-${index}`,
+    winner: "A",
+    rounds: 30,
+    fighters: { A: "甲", B: "乙" },
+    actions: Array.from({ length: 30 }, (_, turn) => ({
+      round: turn + 1,
+      actor: turn % 2 === 0 ? "A" : "B",
+      kind: "basic",
+      hit: true,
+      crit: false,
+      damage: 40,
+      hpLoss: 40,
+      shieldAbsorbed: 0,
+      lifestealHeal: 0,
+      reflectDamage: 0,
+      hp: { A: 300, B: 300 },
+      statusNotes: [],
+    })),
+    totalDamage: { A: 600, B: 600 },
+    injuries: { A: "none", B: "none" },
+    finalHp: { A: 60, B: 60 },
+    injuryMonths: { none: 0, light: 1, heavy: 3 },
+  });
+
+  it("条数上限 + 字节预算：超限自旧向新丢弃，至少保留最新 1 条", () => {
+    const state = newGame();
+    for (let i = 0; i < BATTLE_LOG_LIMIT + 10; i++) {
+      prependBattleReports(state, [bigReport(i)]);
+    }
+    assert.ok(state.battles);
+    assert.ok(state.battles.length <= BATTLE_LOG_LIMIT);
+    const bytes = JSON.stringify(state.battles).length;
+    assert.ok(
+      bytes <= BATTLE_LOG_BYTE_BUDGET,
+      `battles ${bytes}B 应 ≤ 预算 ${BATTLE_LOG_BYTE_BUDGET}B`,
+    );
+    assert.equal(state.battles[0]?.seed, `report-${BATTLE_LOG_LIMIT + 9}`);
+    assert.ok(state.battles.length < BATTLE_LOG_LIMIT + 10);
+  });
+
+  it("确定性：同输入双跑 deepEqual", () => {
+    const first = newGame();
+    const second = newGame();
+    for (let i = 0; i < 12; i++) {
+      prependBattleReports(first, [bigReport(i)]);
+      prependBattleReports(second, [bigReport(i)]);
+    }
+    assert.deepEqual(first.battles, second.battles);
   });
 });

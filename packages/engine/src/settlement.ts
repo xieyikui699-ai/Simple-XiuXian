@@ -9,6 +9,7 @@
 // ⑧ 声望/士气落地与胜负判定（E04-F04：吞并/被吞并/凋敝终局 + 仙途评级）
 // ⑨ 第 12 月：年度衰老与坐化（长老随坐化自动卸任）
 // 纯函数：输入 GameState 返回新 GameState（内部 structuredClone），同输入恒同输出。
+import type { BattleReport } from "./battle.js";
 import { getTechniqueById } from "./catalog.js";
 import { buildCombatProfile } from "./combat-profile.js";
 import {
@@ -83,8 +84,27 @@ export const RESOURCE_ELDER_OFFERING_PCT = 0.2;
 export const WAR_ELDER_BREAKTHROUGH_FLAT = 3;
 /** 休养方针：所有伤势恢复月数 −2（设计 §伤势）。 */
 export const REST_POLICY_INJURY_RECOVERY_MONTHS = 2;
-/** 战报存档上限（最新在前；控制快照体积）。 */
+/** 战报存档条数上限（最新在前；控制快照体积）。 */
 export const BATTLE_LOG_LIMIT = 30;
+/** 战报存档字节预算：序列化总量超预算时丢弃更旧战报（快照 <100KB 约束，设计 D-022）。 */
+export const BATTLE_LOG_BYTE_BUDGET = 45_000;
+
+/**
+ * 战报入库（最新在前）：先按条数上限截断，再按字节预算自旧向新丢弃；至少保留最新 1 条。
+ * 纪事文本不受影响，更早的战斗只留纪事摘要供追溯。
+ */
+export function prependBattleReports(state: GameState, reports: readonly BattleReport[]): void {
+  const merged = [...reports, ...(state.battles ?? [])].slice(0, BATTLE_LOG_LIMIT);
+  const kept: BattleReport[] = [];
+  let totalBytes = 0;
+  for (const report of merged) {
+    const size = JSON.stringify(report).length;
+    if (kept.length > 0 && totalBytes + size > BATTLE_LOG_BYTE_BUDGET) break;
+    kept.push(report);
+    totalBytes += size;
+  }
+  state.battles = kept;
+}
 
 /** 月结 9 步顺序锚点（T-E00-F04-001 golden 契约）：经济→方针→真元突破→生产→历练→NPC→会战→声望胜负→年度衰老。 */
 export const MONTHLY_STEP_ORDER: readonly string[] = [
@@ -238,7 +258,7 @@ function applyExpeditionReport(
     }
   }
   if (report.battle) {
-    state.battles = [report.battle.report, ...(state.battles ?? [])].slice(0, BATTLE_LOG_LIMIT);
+    prependBattleReports(state, [report.battle.report]);
   }
 }
 
@@ -572,10 +592,7 @@ export function settleMonthly(
 
     // 会战记录与战报存档 + 纪事。
     state.sectWars = [record, ...(state.sectWars ?? [])].slice(0, SECT_WAR_RECORD_LIMIT);
-    state.battles = [
-      ...warResult.pairOutcomes.map((pair) => pair.battle).reverse(),
-      ...(state.battles ?? []),
-    ].slice(0, BATTLE_LOG_LIMIT);
+    prependBattleReports(state, warResult.pairOutcomes.map((pair) => pair.battle).reverse());
     appendChronicle(state, {
       turn,
       kind: record.winner === "player" ? "milestone" : "warning",
