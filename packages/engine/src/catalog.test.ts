@@ -405,3 +405,115 @@ describe("craftYieldPct 聚合（丹房/器坊生产速率）", () => {
     );
   });
 });
+
+// ─── T-E00-F02-001 补充：升阶条件表回归（既有 sectUpgradeFailureReason 不回归）───
+
+function discipleFixture(overrides: Partial<Disciple> & Pick<Disciple, "id">): Disciple {
+  const realmLevel = overrides.realmLevel ?? 1;
+  return {
+    id: overrides.id,
+    name: overrides.name ?? `弟子${overrides.id}`,
+    gender: "male",
+    age: 20,
+    maxLifespan: 90,
+    realm: realmStageForLevel(realmLevel).realm,
+    realmLevel,
+    zhenyuan: 0,
+    breakthroughFailures: 0,
+    role: overrides.role ?? "inner",
+    rootType: "single",
+    rootElements: ["metal"],
+    attributes: { strength: 50, soulPower: 50, agility: 50, physique: 50, comprehension: 50 },
+    talentIds: [],
+  };
+}
+
+function sectFixture(overrides: Partial<GameState>): GameState {
+  return {
+    seed: "catalog-seed",
+    sectName: "测试宗",
+    currentTurn: 1,
+    spiritStones: 0,
+    sectRank: 1,
+    morale: 70,
+    prestige: 50,
+    discipleSeq: 0,
+    disciples: [],
+    chronicle: [],
+    fallen: [],
+    ...overrides,
+  };
+}
+
+describe("升阶条件表回归（M1 既有 sectUpgradeFailureReason 不回归）", () => {
+  it("1→2：任一内门达筑基（实力等级 ≥4）+ 灵石 5,000", () => {
+    assert.equal(
+      sectUpgradeFailureReason(
+        sectFixture({
+          spiritStones: 4000,
+          disciples: [discipleFixture({ id: "d-1", realmLevel: 4 })],
+        }),
+      ),
+      "insufficient_resource",
+    );
+    assert.equal(
+      sectUpgradeFailureReason(
+        sectFixture({
+          spiritStones: 6000,
+          disciples: [discipleFixture({ id: "d-1", realmLevel: 3 })],
+        }),
+      ),
+      "sect_upgrade_realm_not_met",
+    );
+    assert.equal(
+      sectUpgradeFailureReason(
+        sectFixture({
+          spiritStones: 6000,
+          disciples: [discipleFixture({ id: "d-1", realmLevel: 4 })],
+        }),
+      ),
+      undefined,
+    );
+  });
+
+  it("2→3：金丹及以上内门弟子 ≥3 + 灵石 30,000", () => {
+    const base = [
+      discipleFixture({ id: "d-1", realmLevel: 7 }),
+      discipleFixture({ id: "d-2", realmLevel: 7 }),
+    ];
+    assert.equal(
+      sectUpgradeFailureReason(
+        sectFixture({
+          sectRank: 2,
+          spiritStones: 29000,
+          disciples: [...base, discipleFixture({ id: "d-3", realmLevel: 7 })],
+        }),
+      ),
+      "insufficient_resource",
+    );
+    assert.equal(
+      sectUpgradeFailureReason(
+        sectFixture({
+          sectRank: 2,
+          spiritStones: 31000,
+          disciples: [...base, discipleFixture({ id: "d-3", realmLevel: 4 })],
+        }),
+      ),
+      "sect_upgrade_golden_core_not_met",
+    );
+    assert.equal(
+      sectUpgradeFailureReason(
+        sectFixture({
+          sectRank: 2,
+          spiritStones: 31000,
+          disciples: [...base, discipleFixture({ id: "d-3", realmLevel: 7 })],
+        }),
+      ),
+      undefined,
+    );
+  });
+
+  it("3 级封顶", () => {
+    assert.equal(sectUpgradeFailureReason(sectFixture({ sectRank: 3 })), "sect_rank_maxed");
+  });
+});
