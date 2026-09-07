@@ -43,6 +43,13 @@ export type NewGameInput = {
   difficulty: Difficulty;
 };
 
+/** UI 难度档 → NPC 发展速度倍率（设计 §NPC 对手宗门 三档）。 */
+const RIVAL_DIFFICULTY_BY_TIER: Record<Difficulty, number> = {
+  easy: 0.8,
+  normal: 1,
+  hard: 1.2,
+};
+
 export type GameSnapshot = {
   /** 当前局状态；null 表示未开局。 */
   state: GameState | null;
@@ -178,7 +185,11 @@ export function createGameStore(backend: SaveBackend, now: () => number = Date.n
     },
     newGame(input) {
       try {
-        const state = createGame({ seed: input.seed, sectName: input.sectName });
+        const state = createGame({
+          seed: input.seed,
+          sectName: input.sectName,
+          rivalDifficulty: RIVAL_DIFFICULTY_BY_TIER[input.difficulty],
+        });
         commit({
           state,
           slot: AUTO_SLOT,

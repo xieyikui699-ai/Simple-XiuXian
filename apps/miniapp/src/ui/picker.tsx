@@ -36,7 +36,8 @@ export function DisciplePicker({
             }}
           >
             <Text>
-              {disciple.name} · {disciple.realm} Lv.{disciple.realmLevel}
+              {disciple.name} · {realmStageForLevel(disciple.realmLevel).name} Lv.
+              {disciple.realmLevel}
             </Text>
             <Text className="muted">
               {reason ||

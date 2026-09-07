@@ -4,6 +4,7 @@
     "ignore": [
       "**/dist/**",
       "**/dist-test/**",
+      "**/dist-web/**",
       "**/node_modules/**",
       "**/.data/**",
       "**/.turbo/**",

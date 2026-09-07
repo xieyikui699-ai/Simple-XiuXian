@@ -73,7 +73,7 @@ export default function IndexPage() {
           />
         </View>
         <View className="field">
-          <Text className="field-label">对手难度（NPC 宗门波次接入后生效）</Text>
+          <Text className="field-label">对手难度（影响 NPC 宗门发展速度）</Text>
           <RadioGroup
             className="difficulty-group"
             onChange={(event) => setDifficulty(event.detail.value as Difficulty)}

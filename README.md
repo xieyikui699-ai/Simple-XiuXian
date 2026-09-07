@@ -30,14 +30,21 @@ pnpm --filter @simple-xiuxian/miniapp build:weapp   # 产物在 apps/miniapp/dis
 pnpm --filter @simple-xiuxian/miniapp dev:weapp     # watch 模式
 ```
 
-微信开发者工具导入 `apps/miniapp`（测试号 touristappid 即可运行），详见 `apps/miniapp/README.md`。
+Web（H5）本地运行（开发与验证基座）：
+
+```
+pnpm --filter @simple-xiuxian/miniapp build:h5   # 产物在 apps/miniapp/dist-web
+node scripts/web-serve.mjs 4173                  # http://localhost:4173
+```
+
+微信开发者工具导入 `apps/miniapp`（weapp 产物，测试号 touristappid），详见 `apps/miniapp/README.md`。
 
 ## 里程碑
 
 1. M1 引擎月结闭环 ✅
 2. M2 战斗引擎 + 内容目录 + 生产消费 + 历练遭遇 ✅
 3. M3 NPC 对手宗门 + 宣战会战 + 胜负结局评级 ✅
-4. M4 小程序 UI 纵切 🔶（八页面全部接通引擎；真机旅程验证待用户执行）
+4. M4 小程序 UI 纵切 ✅（八页面全接通；完整旅程已在 Web/H5 浏览器验证通过）
 5. M5 千局调平 ✅（中位 37 游戏年通关，锚点全过）+ 文档收口 ✅
 
 ## 数值调平结论

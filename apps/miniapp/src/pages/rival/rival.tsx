@@ -2,6 +2,7 @@ import {
   WAR_COOLDOWN_MONTHS,
   canPlayerDeclareWar,
   injuryMonthsLeftFor,
+  realmStageForLevel,
   rivalRosterView,
 } from "@simple-xiuxian/engine";
 import type { GameState } from "@simple-xiuxian/engine";
@@ -93,7 +94,7 @@ export default function RivalPage() {
                   {entry.name}
                 </Text>
                 <Text className={realmToneClass(entry.realmLevel)}>
-                  {entry.realm} · Lv.{entry.realmLevel}
+                  {realmStageForLevel(entry.realmLevel).name} · Lv.{entry.realmLevel}
                 </Text>
                 <Text className={entry.injured ? "rival-injured" : "muted"}>
                   {entry.injured ? `伤势未愈（禁战 ${injuryMonths} 月）` : "可出战"}

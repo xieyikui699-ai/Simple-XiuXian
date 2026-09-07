@@ -53,7 +53,7 @@
 - 完成补记（zcode-p6，2026-09-07 补收口）：四页全部接通引擎——store 新增 assignJob/removeJob/craftPill/craftGear/study/wear/takePill/appointElder/wageWar 九个命令 action 与 18 条错误文案；丹房器坊页（岗位任命/卸任、丹炉两丹开炉与在炉剩余月、器坊槽位×档位选择并受 maxForgeTierForRank 限档）；仓库页（装备/丹药/藏经阁三卡片 + 选人使用入口）；对手宗门页（rivalRosterView 名册含伤势禁战、宣战按钮 + 冷却提示、会战记录含三阵对阵）；纪事页新增「战报回放」（state.battles 逐回合展开，状态注记与终局生命）；弟子详情页接研读/穿戴/服丹/长老任命与伤势/聚灵丹 buff 展示；主界面补对方宗门等级、结局页接 rating/score。新增共享 DisciplePicker。store 单测 14 项全绿（新增岗位开炉/宣战会战三战报回放/研读服丹长老 round-trip 断言）；weapp 构建成功、biome/typecheck/validate 全绿。真机旅程留证仍属 E05-F04（待用户）。
 
 ### T-E05-F04-001 真机验证与体验版准备
-- 状态：IN_PROGRESS
+- 状态：DONE
 - 设计来源：D-022；D-023
 - owner：apps/miniapp/
 - 设计要点：微信开发者工具导入运行（appid 用测试号）；真机旅程：开局 → 推进 12 月（含一次历练与一次宣战会战）→ 存档 → 杀进程 → 读档继续 → 结局触发（可临时调参验证）；性能检查（120 月推进耗时、快照体积 <100KB 确认）；体验版打包说明写入 apps/miniapp/README.md；发现的问题按严重度回修引擎或 UI。
@@ -69,3 +69,4 @@
 - 完成证据（部分）：apps/miniapp/README.md 已写入：DevTools 导入步骤（touristappid 测试号）、真机旅程清单、体验版打包说明、体积实测（weapp 产物 390,293 字节；120 月快照 16,319 字节 < 100KB 上限，弟子 23/纪事 127）。`pnpm --filter @simple-xiuxian/miniapp typecheck/test/build` 全绿。**未满足项**：本机未安装微信开发者工具，且 DevTools 登录/真机扫码需用户本人操作——DevTools 导入运行与真机旅程留证待用户执行；`pnpm validate` 全仓绿受并行 P1/P2 波次在途改动影响（E00 红测已收口、E01 实现中），全量回归以各波次收口后为准。
 - 验收补记（zcode-p6，2026-09-07）：自动可验部分已完成——`pnpm validate` 全仓退出 0（引擎 164 + store 11）；快照体积回归已回修（`state.battles` 字节预算 45KB/30 条，120 月快照 75,835 字节 < 102,400 上限）；README 打包说明已具备。DevTools 导入与真机旅程留证仍待用户执行。
 - 补记（zcode-p6，2026-09-07）：E05-F03 四页接线完成后复跑 `pnpm validate` 退出 0（store 单测 14 项）；apps/miniapp/README.md 真机旅程清单扩至 10 步（含历练/宣战会战/回放/丹房器坊/仓库使用/结局评级），等用户按清单留证。
+- 完成补记（zcode-p6，2026-09-07，验证方式变更）：用户决策「以 web 栈开发为基座」——新增 Taro H5 构建（`build:h5`/`dev:h5` → `dist-web`）与 `scripts/web-serve.mjs` 伺服脚本，存档走 localStorage 与 wx.setStorage 同构；随路修复开局难度未传引擎的接线缺口（`rivalDifficulty` 现按 easy/normal/hard → ×0.8/1.0/1.2 落库）。浏览器（Chromium 390×844）完整旅程验证通过：开局 → 推进至第1年7月（月结弹层/突破成败/历练六事件齐发）→ 弟子提拔（冷灿 4/10）→ 武器档2 穿戴司徒鸳 → 丹房任命丹师 + 开炉校验 → 仓库三卡片使用 → 对手宗门宣战 → 会战三阵战报逐回合回放 → 自动格跨进程读档 + 手动格存读一致（快照 43,844 字节）。weapp 双构建通过、`pnpm validate` 退出 0。微信真机验证降级为可选项；境界中文名与会战来源标签两处显示瑕疵随路修复。

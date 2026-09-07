@@ -9,7 +9,9 @@
     "build:weapp": "taro build --type weapp",
     "build": "pnpm run build:weapp",
     "test": "esbuild src/store/game-store.test.ts --bundle --format=esm --platform=node --external:@simple-xiuxian/engine --outfile=dist-test/game-store.test.mjs && node --test dist-test/game-store.test.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev:h5": "taro build --type h5 --watch",
+    "build:h5": "taro build --type h5"
   },
   "browserslist": ["last 3 versions", "Android >= 4.1", "ios >= 8"],
   "dependencies": {
@@ -18,11 +20,15 @@
     "@tarojs/components": "4.2.1",
     "@tarojs/helper": "4.2.1",
     "@tarojs/plugin-framework-react": "4.2.1",
+    "@tarojs/plugin-html": "4.2.1",
+    "@tarojs/plugin-platform-h5": "4.2.1",
     "@tarojs/plugin-platform-weapp": "4.2.1",
     "@tarojs/react": "4.2.1",
+    "@tarojs/router": "4.2.1",
     "@tarojs/runtime": "4.2.1",
     "@tarojs/shared": "4.2.1",
     "@tarojs/taro": "4.2.1",
+    "@tarojs/taro-h5": "4.2.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

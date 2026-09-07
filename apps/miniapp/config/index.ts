@@ -15,7 +15,8 @@ export default defineConfig(async (merge) => {
       828: 1.81 / 2,
     },
     sourceRoot: "src",
-    outputRoot: "dist",
+    // Web(H5) 开发为验证基座：产物独立目录，避免与 weapp 产物互相覆盖。
+    outputRoot: process.env.TARO_ENV === "h5" ? "dist-web" : "dist",
     plugins: [],
     defineConstants: {},
     copy: {

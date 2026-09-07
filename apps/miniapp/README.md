@@ -27,9 +27,11 @@ apps/miniapp/
 
 ```
 pnpm install                     # 仓库根执行（pnpm workspace）
-pnpm --filter @simple-xiuxian/miniapp build:weapp   # 产出 dist/（DevTools 导入目标）
-pnpm --filter @simple-xiuxian/miniapp dev:weapp     # watch 模式
-pnpm --filter @simple-xiuxian/miniapp test       # esbuild 打包单测 + node --test
+pnpm --filter @simple-xiuxian/miniapp build:h5      # Web/H5 产物 dist-web（开发与验证基座）
+pnpm --filter @simple-xiuxian/miniapp dev:h5        # H5 watch 模式
+node scripts/web-serve.mjs 4173                     # 伺服 dist-web（仓库根）
+pnpm --filter @simple-xiuxian/miniapp build:weapp   # weapp 产物 dist/（DevTools 导入目标）
+pnpm --filter @simple-xiuxian/miniapp test          # esbuild 打包单测 + node --test
 ```
 
 引擎为 workspace 依赖，webpack 打包时从 `packages/engine` 的 ESM 产物引入。
@@ -53,7 +55,9 @@ pnpm --filter @simple-xiuxian/miniapp test       # esbuild 打包单测 + node -
 3. 先执行 `pnpm --filter @simple-xiuxian/miniapp build:weapp` 再导入；开发时可开着 `dev:weapp` watch。
 4. 关闭「ES6 转 ES5」（产物已编译，配置 es6:false）。
 
-## 真机旅程验证清单（E05-F04，待用户执行留证）
+## 旅程验证记录（E05-F04，2026-09-07 于 Web/H5 浏览器完成）
+
+完整旅程已在 H5（Chromium，390×844 视口）通过：开局（宗门名/种子/难度三档）→ 推进至第1年7月（月结弹层/突破成败/历练六事件：寻石 154、切磋、遇险、奇遇武器档2）→ 弟子殿/详情（装备档2 穿戴至司徒鸳、提拔冷灿入内门 4/10）→ 丹房器坊（任命丹师、开炉校验「点数不足」）→ 仓库三卡片使用 → 对手宗门（天魔教名册 30 人/宣战 → 会战三阵全负被掠 219 灵石 → 冷却 12 月）→ 纪事战报逐回合回放（历练 1 场 + 会战 3 场，含会心/未命中）→ 自动格跨进程读档 + 手动格1 存读一致（快照 43,844 字节 <100KB）。weapp 构建同步通过；微信真机验证保留为可选项。
 
 1. 开局：首页输入宗门名/种子/难度 → 开新局。
 2. 推进 12 月（可开自动推进）；查看月结弹层（灵石/突破/坐化摘要）。
@@ -83,7 +87,8 @@ pnpm --filter @simple-xiuxian/miniapp test       # esbuild 打包单测 + node -
 | 研读/穿戴/服丹/长老任命（弟子详情） | ✅ 可用 | E02-F03 管理命令 |
 | 丹房器坊（岗位/开炉/在炉）+ 仓库三卡片 | ✅ 可用 | E02 catalog/production |
 | 对手宗门（名册/宣战/冷却/会战记录） | ✅ 可用 | E04 rival/sect-war |
-| 真机旅程留证 | ⏳ 待用户 | 微信开发者工具/真机 |
+| 旅程验证（Web/H5 浏览器） | ✅ 完成 | Chromium 390×844 |
+| 微信真机验证 | ⏳ 可选项 | 微信开发者工具/真机 |
 
 ## 体验版打包说明
 

@@ -13,7 +13,7 @@ const KIND_LABELS: Record<string, string> = {
 };
 
 const SOURCE_LABELS: Record<string, string> = {
-  war: "会战",
+  "sect-war": "会战",
   expedition: "历练",
   sparring: "切磋",
 };
