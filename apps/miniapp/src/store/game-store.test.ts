@@ -1,4 +1,5 @@
 // 存档 round-trip 单测（F01 通过标准）：写读 deepEqual、损坏容错、指针、体积上限、推进冒烟。
+// E05-F03 补充：管理命令 action（岗位/开炉/研读/穿戴/服丹/长老/宣战）与会战三战报回放数据。
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createGame, settleMonthly } from "@simple-xiuxian/engine";
@@ -132,5 +133,92 @@ describe("会话仓库冒烟", () => {
     assert.ok(state);
     const bytes = JSON.stringify(state).length;
     assert.ok(bytes < 100 * 1024, `快照体积 ${bytes} 字节应 <102400 字节`);
+  });
+});
+
+describe("管理命令 action（E05-F03 接线）", () => {
+  it("岗位任命/卸任 + 丹房开炉扣灵石入在炉任务", () => {
+    const backend = createMemoryBackend();
+    const store = createGameStore(backend, () => 42);
+    store.newGame({ sectName: "丹房宗门", seed: "mng-001", difficulty: "normal" });
+    const inner = store.getState().state?.disciples.find((d) => d.role === "inner");
+    assert.ok(inner);
+    store.assignJob("pill", inner.id);
+    assert.deepEqual(store.getState().state?.jobs?.pill.workers, [inner.id]);
+    // 点数池为 0 → 开炉被拒并给出可读错误。
+    store.craftPill("pill-juling");
+    assert.ok(store.getState().errorMessage?.includes("点数不足"));
+    store.clearError();
+    store.removeJob("pill", inner.id);
+    assert.deepEqual(store.getState().state?.jobs?.pill.workers, []);
+  });
+
+  it("宣战 → 来月会战 → 三份战报可回放（1v1v1 逐回合记录）", () => {
+    const backend = createMemoryBackend();
+    const store = createGameStore(backend, () => 42);
+    store.newGame({ sectName: "会战宗门", seed: "war-001", difficulty: "normal" });
+    store.wageWar();
+    assert.equal(store.getState().state?.warWithRival, true);
+    store.settleMonth("rest");
+    const state = store.getState().state;
+    assert.ok(state);
+    assert.equal(state.warWithRival, false);
+    assert.equal((state.sectWars ?? []).length, 1);
+    const record = (state.sectWars ?? [])[0];
+    assert.ok(record);
+    assert.equal(record.pairOutcomes.length, 3);
+    assert.ok(state.battles);
+    assert.ok(state.battles.length >= 3, "会战三份战报入 state.battles");
+    // 回放数据同源：战报含逐回合 action、终局生命与会战来源标记。
+    for (const report of state.battles.slice(0, 3)) {
+      assert.ok(report.actions.length > 0);
+      assert.ok(report.finalHp.A >= 0 && report.finalHp.B >= 0);
+      assert.equal(report.source, "sect-war");
+      assert.equal(report.turn, state.currentTurn);
+    }
+  });
+
+  it("研读/穿戴/服丹/长老命令走引擎并自动落自动格", () => {
+    const backend = createMemoryBackend();
+    // 藏经阁为空 → 研读被拒；仓库无丹药 → 服丹被拒（错误文案可读）。
+    const probe = createGameStore(backend, () => 42);
+    probe.newGame({ sectName: "命令宗门", seed: "mng-002", difficulty: "normal" });
+    const probeDisciple = probe.getState().state?.disciples.find((d) => d.role === "inner");
+    assert.ok(probeDisciple);
+    probe.study(probeDisciple.id, "tech-hunyuan");
+    assert.ok(probe.getState().errorMessage?.includes("藏经阁"));
+    probe.clearError();
+    probe.takePill(probeDisciple.id, "pill-yanshou");
+    assert.ok(probe.getState().errorMessage?.includes("仓库"));
+    probe.clearError();
+    // 铺底：手动格注入藏经阁功法书与一颗聚灵丹，读档后走命令。
+    const seeded = createGame({ seed: "mng-002", sectName: "命令宗门" });
+    const seededWarehouse = seeded.warehouse ?? { gear: [], pills: [] };
+    const seededLibrary = seeded.library ?? { techniqueIds: [], spellIds: [] };
+    seededWarehouse.pills.push({ pillId: "pill-juling", count: 1 });
+    seededLibrary.techniqueIds.push("tech-hunyuan");
+    writeSave(backend, 1, seeded, "normal", 1);
+    const store = createGameStore(backend, () => 42);
+    assert.equal(store.loadSlot(1), true);
+    const loaded = store.getState().state;
+    assert.ok(loaded);
+    const target = loaded.disciples.find((d) => d.role === "inner");
+    assert.ok(target);
+    store.study(target.id, "tech-hunyuan");
+    assert.equal(
+      store.getState().state?.disciples.find((d) => d.id === target.id)?.techniqueId,
+      "tech-hunyuan",
+    );
+    store.takePill(target.id, "pill-juling");
+    assert.ok(
+      (store.getState().state?.disciples.find((d) => d.id === target.id)?.spiritFocusUntilTurn ??
+        0) > 0,
+    );
+    store.appointElder(target.id, "resource");
+    assert.equal(store.getState().state?.elders?.resource, target.id);
+    // 命令后自动落自动格（读回一致）。
+    const autoSave = readSave(backend, AUTO_SLOT);
+    assert.ok(autoSave);
+    assert.equal(autoSave.state.elders?.resource, target.id);
   });
 });

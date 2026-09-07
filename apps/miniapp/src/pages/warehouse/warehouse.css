@@ -1,0 +1,27 @@
+.stock-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  padding: 12rpx 0;
+  border-bottom: 2rpx solid #f0e8d8;
+}
+
+.stock-row:last-child {
+  border-bottom: none;
+}
+
+.stock-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  flex: 1;
+}
+
+.btn-mini {
+  align-self: center;
+  font-size: 24rpx;
+  padding: 4rpx 18rpx;
+  line-height: 1.6;
+}

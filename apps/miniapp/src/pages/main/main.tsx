@@ -99,8 +99,10 @@ export default function MainPage() {
             </Text>
           </View>
           <View className="stat">
-            <Text className="stat-value muted">未实装</Text>
-            <Text className="stat-label">对方宗门等级</Text>
+            <Text className="stat-value">{state.rival ? `${state.rival.sectRank} 级` : "—"}</Text>
+            <Text className="stat-label">
+              对方{state.rival ? `（${state.rival.name}）` : "宗门等级"}
+            </Text>
           </View>
         </View>
       </View>

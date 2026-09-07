@@ -1,0 +1,53 @@
+.rival-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  margin-bottom: 10rpx;
+}
+
+.rival-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  padding: 10rpx 0;
+  border-bottom: 2rpx solid #f0e8d8;
+}
+
+.rival-row:last-child {
+  border-bottom: none;
+}
+
+.rival-injured {
+  color: #b03030;
+  font-size: 24rpx;
+}
+
+.war-banner {
+  color: #b03030;
+  font-weight: 600;
+  margin: 8rpx 0;
+}
+
+.war-record {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  padding: 12rpx 0;
+  border-bottom: 2rpx solid #f0e8d8;
+}
+
+.war-record:last-child {
+  border-bottom: none;
+}
+
+.war-win {
+  color: #7a5a12;
+  font-weight: 600;
+}
+
+.war-lose {
+  color: #b03030;
+  font-weight: 600;
+}

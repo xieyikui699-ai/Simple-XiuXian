@@ -1,14 +1,28 @@
 // 会话仓库：包装引擎命令与存档适配层，向 UI 暴露单一可订阅快照。
 // 引擎命令全部走 @simple-xiuxian/engine 导出（UI 不复制公式）；每次变更自动写自动格。
 import {
+  type CraftJobKind,
+  type ElderKind,
   type GameState,
+  type GearSlot,
+  type GearTier,
   type MonthlyPolicy,
   type SettlementResult,
+  appointElder,
+  assignWorkshopJob,
+  canPlayerDeclareWar,
   createGame,
+  declareWar,
+  learnArt,
   promoteToInner,
   recruitDisciple,
+  removeWorkshopJob,
   settleMonthly,
+  startGearCraft,
+  startPillCraft,
   upgradeSect,
+  usePill,
+  wearGear,
 } from "@simple-xiuxian/engine";
 import {
   AUTO_SLOT,
@@ -54,6 +68,24 @@ const ERROR_MESSAGES: Record<string, string> = {
   disciple_already_inner: "该弟子已是内门弟子",
   inner_limit_reached: "内门席位已满",
   sect_rank_maxed: "宗门已是最高等级",
+  disciple_not_inner: "仅内门弟子可执行此操作",
+  disciple_not_adult: "弟子尚未成年",
+  disciple_job_busy: "该弟子已有在身职务",
+  workshop_job_full: "该车间岗位已满",
+  workshop_job_not_held: "该弟子未任此岗",
+  craft_points_insufficient: "车间点数不足",
+  gear_invalid: "装备档位不存在",
+  gear_tier_locked: "宗门等级限制可炼档位",
+  pill_not_found: "丹药不存在",
+  pill_not_in_warehouse: "仓库中没有此丹药",
+  art_not_found: "不存在此功法或法术",
+  art_not_in_library: "藏经阁尚无此书，历练奇遇可得",
+  technique_limit_reached: "每弟子限修一门功法",
+  spell_limit_reached: "每弟子限修两门法术",
+  spell_already_learned: "该法术已在修",
+  war_already_declared: "已处于宣战状态",
+  war_cooldown_active: "会战冷却中，暂不可宣战",
+  rival_missing: "对手宗门不存在",
 };
 
 export function describeError(error: unknown): string {
@@ -80,6 +112,23 @@ export type GameStore = {
   promote(discipleId: string): void;
   recruit(candidateId: string): void;
   upgrade(): void;
+  /** 丹房/器坊岗位任命（E02-F03 管理命令）。 */
+  assignJob(kind: CraftJobKind, discipleId: string): void;
+  removeJob(kind: CraftJobKind, discipleId: string): void;
+  /** 丹房开炉（灵石即扣、点数池即扣，到期自动出炉入仓库）。 */
+  craftPill(pillId: string): void;
+  /** 器坊开炉（点数/灵石校验通过即出炉入仓库）。 */
+  craftGear(slot: GearSlot, tier: GearTier): void;
+  /** 研读功法/法术（藏经阁拥有即可）。 */
+  study(discipleId: string, artId: string): void;
+  /** 任命长老（资源/战备各至多 1 名；旧长老自动卸任）。 */
+  appointElder(discipleId: string, kind: ElderKind): void;
+  /** 穿戴装备：仓库取同槽同档，原槽装备卸下回仓。 */
+  wear(discipleId: string, slot: GearSlot, tier: GearTier): void;
+  /** 服用丹药：延寿丹 +10 寿命；聚灵丹 12 月真元 ×1.5（刷新不叠加）。 */
+  takePill(discipleId: string, pillId: string): void;
+  /** 玩家宣战：来月月结第 ⑦ 步触发会战。 */
+  wageWar(): void;
   clearError(): void;
   /** 关闭月结结果弹层。 */
   clearResult(): void;
@@ -206,6 +255,78 @@ export function createGameStore(backend: SaveBackend, now: () => number = Date.n
         if (!snapshot.state) throw new Error("disciple_not_found");
         const outcome = upgradeSect(snapshot.state);
         commit({ state: outcome.state });
+        persistAuto();
+      });
+    },
+    assignJob(kind, discipleId) {
+      runEngineCommand(() => {
+        if (!snapshot.state) throw new Error("disciple_not_found");
+        const outcome = assignWorkshopJob(snapshot.state, kind, discipleId);
+        commit({ state: outcome.state });
+        persistAuto();
+      });
+    },
+    removeJob(kind, discipleId) {
+      runEngineCommand(() => {
+        if (!snapshot.state) throw new Error("disciple_not_found");
+        const outcome = removeWorkshopJob(snapshot.state, kind, discipleId);
+        commit({ state: outcome.state });
+        persistAuto();
+      });
+    },
+    craftPill(pillId) {
+      runEngineCommand(() => {
+        if (!snapshot.state) throw new Error("disciple_not_found");
+        const outcome = startPillCraft(snapshot.state, pillId);
+        commit({ state: outcome.state });
+        persistAuto();
+      });
+    },
+    craftGear(slot, tier) {
+      runEngineCommand(() => {
+        if (!snapshot.state) throw new Error("disciple_not_found");
+        const outcome = startGearCraft(snapshot.state, slot, tier);
+        commit({ state: outcome.state });
+        persistAuto();
+      });
+    },
+    study(discipleId, artId) {
+      runEngineCommand(() => {
+        if (!snapshot.state) throw new Error("disciple_not_found");
+        const outcome = learnArt(snapshot.state, discipleId, artId);
+        commit({ state: outcome.state });
+        persistAuto();
+      });
+    },
+    appointElder(discipleId, kind) {
+      runEngineCommand(() => {
+        if (!snapshot.state) throw new Error("disciple_not_found");
+        const outcome = appointElder(snapshot.state, discipleId, kind);
+        commit({ state: outcome.state });
+        persistAuto();
+      });
+    },
+    wear(discipleId, slot, tier) {
+      runEngineCommand(() => {
+        if (!snapshot.state) throw new Error("disciple_not_found");
+        const outcome = wearGear(snapshot.state, discipleId, slot, tier);
+        commit({ state: outcome.state });
+        persistAuto();
+      });
+    },
+    takePill(discipleId, pillId) {
+      runEngineCommand(() => {
+        if (!snapshot.state) throw new Error("disciple_not_found");
+        const outcome = usePill(snapshot.state, discipleId, pillId);
+        commit({ state: outcome.state });
+        persistAuto();
+      });
+    },
+    wageWar() {
+      runEngineCommand(() => {
+        if (!snapshot.state) throw new Error("disciple_not_found");
+        if (!canPlayerDeclareWar(snapshot.state)) throw new Error("war_cooldown_active");
+        commit({ state: declareWar(snapshot.state) });
         persistAuto();
       });
     },

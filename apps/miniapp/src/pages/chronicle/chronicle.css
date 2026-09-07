@@ -35,3 +35,84 @@
 .chronicle-normal {
   color: #33291f;
 }
+
+.replay-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  padding: 10rpx 0;
+  border-bottom: 2rpx solid #f0e8d8;
+}
+
+.replay-item:last-child {
+  border-bottom: none;
+}
+
+.replay-head {
+  padding: 10rpx 12rpx;
+  border-radius: 10rpx;
+}
+
+.replay-head-win {
+  background: #efe2bd;
+  color: #7a5a12;
+}
+
+.replay-head-lose {
+  background: #f3dede;
+  color: #b03030;
+}
+
+.replay-head-draw {
+  background: #efe9dc;
+  color: #6b5a3e;
+}
+
+.replay-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  padding: 8rpx 4rpx;
+}
+
+.replay-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  font-size: 24rpx;
+}
+
+.replay-round {
+  width: 56rpx;
+  color: #8a7d6a;
+}
+
+.replay-side-A {
+  color: #7a5a12;
+}
+
+.replay-side-B {
+  color: #8c4a3c;
+}
+
+.replay-kind {
+  color: #5a4a2f;
+}
+
+.replay-detail {
+  flex: 1;
+}
+
+.replay-hp {
+  color: #8a7d6a;
+}
+
+.replay-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+  padding: 6rpx;
+  background: #f6efdd;
+  border-radius: 8rpx;
+}

@@ -33,7 +33,7 @@ export default function EndingPage() {
         <View className="card">
           <View className="card-title">本局仍在进行</View>
           <Text className="muted">
-            我方弟子元婴前期圆满突破即飞升；吞并/凋敝等胜负判定将于胜负结局波次（E04-F04）接入。
+            我方弟子元婴前期圆满突破即飞升；压制对方声望可吞并，内门凋敝则宗门败落。
           </Text>
         </View>
       )}
@@ -65,7 +65,16 @@ export default function EndingPage() {
 
       <View className="card">
         <View className="card-title">仙途评级</View>
-        <Text className="muted">甲/乙/丙/丁评级将于胜负结局与评级波次（E04-F04）接入。</Text>
+        {state.ending?.rating ? (
+          <View className="ending-row">
+            <Text>评级（用时/突破/会战胜绩/坐化/灵石）</Text>
+            <Text>
+              {state.ending.rating} · 得分 {state.ending.score ?? "—"}/10
+            </Text>
+          </View>
+        ) : (
+          <Text className="muted">终局后由引擎结算给出甲/乙/丙/丁评级。</Text>
+        )}
       </View>
 
       <Button

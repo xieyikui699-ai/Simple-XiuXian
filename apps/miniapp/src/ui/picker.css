@@ -1,0 +1,30 @@
+.picker {
+  margin-top: 12rpx;
+  padding: 12rpx;
+  background: #f6efdd;
+  border-radius: 12rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.picker-title {
+  font-weight: 600;
+  font-size: 26rpx;
+}
+
+.picker-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+  padding: 8rpx;
+  border-bottom: 2rpx solid #eadfc4;
+}
+
+.picker-row:last-child {
+  border-bottom: none;
+}
+
+.picker-row-disabled {
+  opacity: 0.5;
+}
