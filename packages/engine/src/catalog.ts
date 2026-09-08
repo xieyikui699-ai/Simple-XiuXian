@@ -64,7 +64,8 @@ export function getTechniqueById(id: string): Technique | undefined {
 }
 
 // ─── 法术目录（12 门，主动战技）─────────────────────────────────────────
-// 每弟子限修 2 门，从藏经阁已有法术中选择；与弟子任一灵根元素同系威力 +15%。
+// 每弟子限修 2 门，从藏经阁已有法术中选择（突破顿悟可直接领悟未修法术，见 settlement.ts）；
+// 与弟子任一灵根元素同系威力 +15%。
 
 export type SpellElement = RootElement | "none";
 
@@ -236,16 +237,14 @@ export function canLearnSpell(
   return librarySpellIds.includes(spellId) && learnedCount < MAX_SPELLS_PER_DISCIPLE;
 }
 
-// ─── 装备系统（4 槽 × 4 档固定数值）─────────────────────────────────────
-// 无随机、无词缀；弟子 4 槽各至多 1 件；来源：器坊炼制 + 历练掉落。
+// ─── 装备系统（法宝 × 4 档固定数值）─────────────────────────────────────
+// 无随机、无词缀；弟子至多 1 件法宝；来源：器坊炼制 + 历练掉落。
+// 只有法宝一件装备（功法/法术之外唯一物件），无武器护甲饰品。
 
-export const GEAR_SLOT_KEYS = ["weapon", "armor", "accessory", "talisman"] as const;
+export const GEAR_SLOT_KEYS = ["talisman"] as const;
 export type GearSlot = (typeof GEAR_SLOT_KEYS)[number];
 
 export const GEAR_SLOT_DISPLAY_NAMES: Record<GearSlot, string> = {
-  weapon: "武器",
-  armor: "护甲",
-  accessory: "饰品",
   talisman: "法宝",
 };
 
@@ -253,36 +252,12 @@ export type GearTier = 1 | 2 | 3 | 4;
 export const GEAR_TIERS: readonly GearTier[] = [1, 2, 3, 4];
 
 export type GearStats = {
-  /** 物理攻击平加（武器）。 */
-  attackFlat?: number;
-  /** 防御平加（护甲）。 */
-  defenseFlat?: number;
-  /** 五维各 +N（饰品）。 */
-  attributeFlat?: number;
   /** 法术威力平加（法宝）。 */
-  spellPowerFlat?: number;
+  spellPowerFlat: number;
 };
 
-/** 4 槽 × 4 档固定数值表。 */
+/** 法宝 4 档固定数值表。 */
 export const GEAR_CATALOG: Record<GearSlot, Record<GearTier, GearStats>> = {
-  weapon: {
-    1: { attackFlat: 10 },
-    2: { attackFlat: 25 },
-    3: { attackFlat: 45 },
-    4: { attackFlat: 70 },
-  },
-  armor: {
-    1: { defenseFlat: 10 },
-    2: { defenseFlat: 25 },
-    3: { defenseFlat: 45 },
-    4: { defenseFlat: 70 },
-  },
-  accessory: {
-    1: { attributeFlat: 2 },
-    2: { attributeFlat: 4 },
-    3: { attributeFlat: 6 },
-    4: { attributeFlat: 9 },
-  },
   talisman: {
     1: { spellPowerFlat: 8 },
     2: { spellPowerFlat: 14 },
@@ -295,11 +270,8 @@ export function getGear(slot: GearSlot, tier: GearTier): GearStats | undefined {
   return GEAR_CATALOG[slot]?.[tier];
 }
 
-/** 器坊炼制需求点数：档 1=20 / 档 2=60 / 档 3=150 / 档 4=300。 */
+/** 器坊炼制总点数（月结按投入外门人数推进）：档 1=20 / 档 2=60 / 档 3=150 / 档 4=300。 */
 export const GEAR_CRAFT_POINTS: Record<GearTier, number> = { 1: 20, 2: 60, 3: 150, 4: 300 };
-
-/** 器坊炼制灵石费用：档 1=200 / 档 2=600 / 档 3=1500 / 档 4=3000。 */
-export const GEAR_CRAFT_COST: Record<GearTier, number> = { 1: 200, 2: 600, 3: 1500, 4: 3000 };
 
 /** 宗门等级限档：1 级→档 1–2 / 2 级→档 1–3 / 3 级→档 1–4。 */
 export const FORGE_TIER_LIMIT_BY_RANK: Record<1 | 2 | 3, GearTier> = { 1: 2, 2: 3, 3: 4 };
@@ -307,20 +279,13 @@ export const FORGE_TIER_LIMIT_BY_RANK: Record<1 | 2 | 3, GearTier> = { 1: 2, 2: 
 /** 弟子已穿戴装备：槽位 → 档位（每槽至多 1 件；固定数值无实例差异）。 */
 export type EquippedGear = { [slot in GearSlot]?: GearTier };
 
-/** 装备战力输入接口（供 combat-profile 读取）：四槽合计平加。 */
+/** 装备战力输入接口（供 combat-profile 读取）：法宝法威平加。 */
 export type GearCombatInput = {
-  attackFlat: number;
-  defenseFlat: number;
-  /** 五维各 +N。 */
-  attributeFlat: number;
   spellPowerFlat: number;
 };
 
 export function gearCombatInput(equipped: EquippedGear | undefined): GearCombatInput {
   const result: GearCombatInput = {
-    attackFlat: 0,
-    defenseFlat: 0,
-    attributeFlat: 0,
     spellPowerFlat: 0,
   };
   if (!equipped) return result;
@@ -329,10 +294,7 @@ export function gearCombatInput(equipped: EquippedGear | undefined): GearCombatI
     if (tier === undefined) continue;
     const stats = getGear(slot, tier);
     if (!stats) continue;
-    result.attackFlat += stats.attackFlat ?? 0;
-    result.defenseFlat += stats.defenseFlat ?? 0;
-    result.attributeFlat += stats.attributeFlat ?? 0;
-    result.spellPowerFlat += stats.spellPowerFlat ?? 0;
+    result.spellPowerFlat += stats.spellPowerFlat;
   }
   return result;
 }
@@ -350,12 +312,6 @@ export type Pill = {
   id: string;
   name: string;
   effect: PillEffect;
-  /** 炼制需求点数（点/炉）。 */
-  craftPoints: number;
-  /** 炼制灵石费用（灵石/炉）。 */
-  craftCost: number;
-  /** 在炉周期（月）。 */
-  craftMonths: number;
 };
 
 export const PILLS: readonly Pill[] = [
@@ -363,17 +319,11 @@ export const PILLS: readonly Pill[] = [
     id: "pill-yanshou",
     name: "延寿丹",
     effect: { lifespanFlat: 10 },
-    craftPoints: 40,
-    craftCost: 500,
-    craftMonths: 2,
   },
   {
     id: "pill-juling",
     name: "聚灵丹",
     effect: { zhenyuanBuff: { multiplier: 1.5, months: 12, stacks: false } },
-    craftPoints: 20,
-    craftCost: 300,
-    craftMonths: 1,
   },
 ] as const;
 

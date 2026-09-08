@@ -1,0 +1,24 @@
+/* H5 顶部返回栏（仅 h5 产物引入）。 */
+.back-bar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 88rpx;
+  padding: calc(env(safe-area-inset-top) + 0rpx) 24rpx 0;
+  background: var(--ink);
+  color: #f0e8d8;
+}
+
+.back-bar-arrow {
+  font-size: 44rpx;
+  line-height: 1;
+  margin-right: 14rpx;
+  padding: 0 10rpx;
+}
+
+.back-bar-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+}

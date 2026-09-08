@@ -1,4 +1,4 @@
-// 引擎门面：开局、月结、招募、提拔、升阶 + M2 管理命令（研读功法法术/穿戴装备/服用丹药/任命长老）。
+// 引擎门面：开局、月结、招募、升阶 + M2 管理命令（研读功法法术/穿戴装备/服用丹药/任命长老）。
 // 所有操作返回新状态（纯函数、确定性）；每条管理命令落纪事 normal 一条。
 import {
   GEAR_SLOT_DISPLAY_NAMES,
@@ -14,13 +14,12 @@ import {
 import { combatReadyDisciples } from "./expedition.js";
 import { generateDisciple } from "./generation.js";
 import { ADULT_AGE } from "./production.js";
-import { realmLifespanBonusForLevel, realmStageForLevel } from "./realms.js";
+import { realmStageForLevel } from "./realms.js";
 import { canPlayerDeclareWar, createRivalSect, declareWar } from "./rival.js";
 import { SECT_WAR_FIGHTERS } from "./sect-war.js";
 import {
   INITIAL_INNER_DISCIPLES,
   INITIAL_MORALE,
-  INITIAL_OUTER_DISCIPLES,
   INITIAL_PRESTIGE,
   INITIAL_SPIRIT_STONES,
   RECRUIT_CANDIDATE_COUNT,
@@ -83,23 +82,11 @@ export function createGame(input: CreateGameInput): GameState {
       ordinal: state.discipleSeq,
       usedNames,
       age: initialAges[i] ?? 16,
-      role: "inner",
     });
     usedNames.push(disciple.name);
     state.disciples.push(disciple);
   }
-  for (let i = 0; i < INITIAL_OUTER_DISCIPLES; i++) {
-    state.discipleSeq += 1;
-    const disciple = generateDisciple({
-      gameSeed: state.seed,
-      discipleId: `d-${state.discipleSeq}`,
-      ordinal: state.discipleSeq,
-      usedNames,
-      role: "outer",
-    });
-    usedNames.push(disciple.name);
-    state.disciples.push(disciple);
-  }
+  // 外门不入状态：总数恒等于宗门等级上限（1 级 100），无个体名册、不占弟子编号。
 
   // NPC 对手宗门：与玩家同 seed 确定性生成，开局同为 1 级宗门（设计 §NPC 对手宗门）。
   state.rival = createRivalSect({
@@ -122,7 +109,6 @@ export function listRecruitCandidates(state: Readonly<GameState>): RecruitmentCa
       discipleId: `preview:${candidateId}`,
       ordinal: state.discipleSeq + 1 + i,
       usedNames: [...usedNames, ...seen],
-      role: "outer",
     });
     seen.add(candidate.name);
     candidates.push({ candidateId, disciple: candidate });
@@ -135,46 +121,25 @@ export type RecruitOutcome = {
   disciple: Disciple;
 };
 
+/** 招募弟子：候选 3 选 1，直接录入内门（外门只是数字、不经外门周转）；受内门上限约束。 */
 export function recruitDisciple(
   stateInput: Readonly<GameState>,
   candidateId: string,
 ): RecruitOutcome {
   if (stateInput.ending) throw new Error("game_already_ended");
   if (stateInput.spiritStones < RECRUIT_COST) throw new Error("insufficient_resource");
+  if (stateInput.disciples.length >= sectLimitsFor(stateInput.sectRank).innerLimit) {
+    throw new Error("inner_limit_reached");
+  }
   const candidates = listRecruitCandidates(stateInput);
   const chosen = candidates.find((candidate) => candidate.candidateId === candidateId);
   if (!chosen) throw new Error("candidate_not_found");
   const state = structuredClone(stateInput) as GameState;
   state.spiritStones -= RECRUIT_COST;
   state.discipleSeq += 1;
-  const disciple = generateDisciple({
-    gameSeed: state.seed,
-    discipleId: `d-${state.discipleSeq}`,
-    ordinal: state.discipleSeq,
-    usedNames: state.disciples.map((existing) => existing.name),
-    role: "outer",
-  });
+  // 所选候选原样录入（名册预览即录入本人，3 选 1 的选择生效）；弟子编号仍按 d-1 顺号分配。
+  const disciple: Disciple = { ...chosen.disciple, id: `d-${state.discipleSeq}` };
   state.disciples.push(disciple);
-  return { state, disciple };
-}
-
-export type PromoteOutcome = {
-  state: GameState;
-  disciple: Disciple;
-};
-
-export function promoteToInner(
-  stateInput: Readonly<GameState>,
-  discipleId: string,
-): PromoteOutcome {
-  const state = structuredClone(stateInput) as GameState;
-  const disciple = state.disciples.find((existing) => existing.id === discipleId);
-  if (!disciple) throw new Error("disciple_not_found");
-  if (disciple.role === "inner") throw new Error("disciple_already_inner");
-  const limits = sectLimitsFor(state.sectRank);
-  const innerCount = state.disciples.filter((existing) => existing.role === "inner").length;
-  if (innerCount >= limits.innerLimit) throw new Error("inner_limit_reached");
-  disciple.role = "inner";
   return { state, disciple };
 }
 
@@ -220,7 +185,6 @@ export function learnArt(
   if (stateInput.ending) throw new Error("game_already_ended");
   const disciple = stateInput.disciples.find((entry) => entry.id === discipleId);
   if (!disciple) throw new Error("disciple_not_found");
-  if (disciple.role !== "inner") throw new Error("disciple_not_inner");
   const library = stateInput.library ?? emptyLibrary();
   let plan: { kind: "technique"; name: string } | { kind: "spell"; name: string };
   const technique = getTechniqueById(artId);
@@ -277,7 +241,6 @@ export function wearGear(
   if (stateInput.ending) throw new Error("game_already_ended");
   const disciple = stateInput.disciples.find((entry) => entry.id === discipleId);
   if (!disciple) throw new Error("disciple_not_found");
-  if (disciple.role !== "inner") throw new Error("disciple_not_inner");
   if (!getGear(slot, tier)) throw new Error("gear_invalid");
   const warehouse = stateInput.warehouse ?? emptyWarehouse();
   const stockIndex = warehouse.gear.findIndex((item) => item.slot === slot && item.tier === tier);
@@ -356,7 +319,7 @@ export type AppointElderOutcome = {
   replacedDiscipleId?: string;
 };
 
-/** 任命长老：资源长老（外门供奉 +20%）/ 战备长老（全门突破率 +3），各至多 1 名，可替换（旧长老卸任）。 */
+/** 任命长老：资源长老（宗门供奉 +20%）/ 战备长老（全门突破率 +3），各至多 1 名，可替换（旧长老卸任）。 */
 export function appointElder(
   stateInput: Readonly<GameState>,
   discipleId: string,
@@ -365,7 +328,6 @@ export function appointElder(
   if (stateInput.ending) throw new Error("game_already_ended");
   const disciple = stateInput.disciples.find((entry) => entry.id === discipleId);
   if (!disciple) throw new Error("disciple_not_found");
-  if (disciple.role !== "inner") throw new Error("disciple_not_inner");
   if (disciple.age < ADULT_AGE) throw new Error("disciple_not_adult");
   const jobs = stateInput.jobs ?? emptySectJobs();
   for (const workshopKind of ["pill", "gear"] as const) {
@@ -383,7 +345,7 @@ export function appointElder(
   const replaced = kind === "resource" ? state.elders?.resource : state.elders?.war;
   state.elders = { ...(state.elders ?? {}), [kind]: discipleId };
   const elderName = kind === "resource" ? "资源长老" : "战备长老";
-  const elderEffect = kind === "resource" ? "外门供奉 +20%" : "全门突破成功率 +3";
+  const elderEffect = kind === "resource" ? "宗门供奉 +20%" : "全门突破成功率 +3";
   appendChronicle(state, {
     turn: state.currentTurn,
     kind: "normal",
@@ -400,7 +362,6 @@ export function discipleCultivationView(state: Readonly<GameState>, disciple: Di
     requiredZhenyuan: stage.requiredZhenyuan,
     monthlyGain: monthlyZhenyuanGain(state, disciple),
     successRate: currentSuccessRate(disciple, stage.baseSuccessRate),
-    realmLifespanBonus: realmLifespanBonusForLevel(disciple.realmLevel),
   };
 }
 

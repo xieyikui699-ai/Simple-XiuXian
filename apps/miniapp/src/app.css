@@ -1,29 +1,102 @@
-/* 全局样式：宣纸底色 + 墨色卡片的极简底子，页面级细化放各自 css。 */
-page {
-  background: #f4efe4;
-  color: #33291f;
+/* 全局样式：宣纸墨韵·竖屏优先（9:16）。
+   设计令牌 + 页面壳（.page / .page-body / .page-footer）+ 基础组件，页面级细化放各自 css。
+   `page, body` 双选择器：weapp 命中 page，H5 命中 body（二者互为死规则，无害）。 */
+page,
+body {
+  /* 设计令牌 */
+  --bg: #ece3d0;
+  --card: #fdfaf1;
+  --card-2: #f3ecda;
+  --line: #e3d8bf;
+  --line-strong: #ccbc9b;
+  --ink: #2b2420;
+  --ink-2: #45372b;
+  --text: #35291d;
+  --muted: #8d7e68;
+  --accent: #8a4f24;
+  --accent-deep: #6e3d1a;
+  --gold: #a8760a;
+  --green: #3c7a5a;
+  --red: #b03030;
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
   font-size: 28rpx;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Source Han Serif SC", serif;
 }
 
+/* 页面壳：竖屏上下结构，内容区滚动、底部动作栏固定。 */
 .page {
-  padding: 24rpx;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
 }
 
+.page-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 24rpx 24rpx 48rpx;
+  box-sizing: border-box;
+  scrollbar-width: none;
+}
+
+.page-body::-webkit-scrollbar,
+.taro_page::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.page-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 20rpx;
+  padding: 20rpx 24rpx calc(16rpx + env(safe-area-inset-bottom));
+  background: var(--card);
+  border-top: 2rpx solid var(--line);
+}
+
+/* 卡片 */
 .card {
-  background: #fffdf7;
-  border: 2rpx solid #e3d9c6;
-  border-radius: 16rpx;
-  padding: 24rpx;
+  background: var(--card);
+  border: 2rpx solid var(--line);
+  border-radius: 20rpx;
+  padding: 26rpx;
   margin-bottom: 24rpx;
+  box-shadow: 0 4rpx 16rpx rgba(59, 42, 24, 0.06);
+  box-sizing: border-box;
 }
 
 .card-title {
-  font-weight: 600;
-  margin-bottom: 16rpx;
+  position: relative;
+  padding-left: 22rpx;
+  font-weight: 700;
+  font-size: 30rpx;
+  letter-spacing: 2rpx;
+  margin-bottom: 18rpx;
+}
+
+/* 装饰条用绝对定位，不参与 flex 布局（space-between 的标题行不被挤偏）。 */
+.card-title::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8rpx;
+  height: 28rpx;
+  border-radius: 4rpx;
+  background: var(--accent);
 }
 
 .muted {
-  color: #8a7d6a;
+  color: var(--muted);
   font-size: 24rpx;
 }
 
@@ -33,10 +106,72 @@ page {
   align-items: center;
 }
 
+/* 按钮体系：统一高度/圆角，主色墨棕；weapp 需重置原生按钮边框。
+   disabled 选择器用 [disabled="true"]：Taro H5 会把 disabled={false} 反射成 disabled="false"。 */
+.btn-primary,
+.btn-advance,
+.btn-upgrade,
+.btn-recruit,
+.btn-admit,
+.btn-mini,
+.btn-save,
+.continue-resume {
+  margin: 0;
+  padding: 0 30rpx;
+  height: 80rpx;
+  line-height: 80rpx;
+  width: auto;
+  /* H5 端 Taro 按钮默认 display:block 会被拉满宽，收成内容宽（块级上下文中靠此收缩）。 */
+  display: inline-block;
+  vertical-align: middle;
+  border-radius: 16rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+  text-align: center;
+  border: none;
+  box-sizing: border-box;
+}
+
+.btn-primary::after,
+.btn-advance::after,
+.btn-upgrade::after,
+.btn-recruit::after,
+.btn-admit::after,
+.btn-mini::after,
+.btn-save::after,
+.continue-resume::after {
+  border: none;
+}
+
 .btn-primary {
-  margin-top: 24rpx;
-  background: #7a4f2b;
+  margin-top: 12rpx;
+  width: 100%;
+  background: var(--accent);
   color: #fff;
+}
+
+.btn-primary[disabled="true"] {
+  background: var(--accent);
+  color: #fff;
+  opacity: 0.45;
+}
+
+.btn-mini {
+  flex-shrink: 0;
+  align-self: center;
+  height: 60rpx;
+  line-height: 60rpx;
+  padding: 0 22rpx;
+  font-size: 24rpx;
+  border-radius: 999rpx;
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-mini[disabled="true"] {
+  background: var(--card-2);
+  color: var(--muted);
+  border: 2rpx solid var(--line);
 }
 
 /* 境界等级着色：练气青 / 筑基蓝 / 金丹紫 / 元婴金。 */
@@ -57,16 +192,54 @@ page {
 }
 
 .error-line {
-  color: #b03030;
+  display: block;
+  color: var(--red);
   font-size: 24rpx;
-  margin-top: 12rpx;
+  margin-top: 14rpx;
+  line-height: 1.5;
 }
 
 .banner-ending {
-  background: #fdf3e7;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(135deg, #fdf3e7, #f6e5c6);
   border: 2rpx solid #d9a05b;
-  border-radius: 16rpx;
-  padding: 20rpx 24rpx;
+  border-radius: 20rpx;
+  padding: 22rpx 26rpx;
   margin-bottom: 24rpx;
   color: #8a5a1f;
+  font-size: 26rpx;
+  font-weight: 600;
+}
+
+.banner-ending::after {
+  content: "›";
+  color: #b98336;
+  font-size: 32rpx;
+}
+
+/* —— H5 桌面端 9:16 舞台（stage-framed 由 index.html 脚本注入，手机竖屏不生效）—— */
+.stage-framed body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(1200px 800px at 50% 18%, #3d3126, #17120e 72%);
+}
+
+.stage-framed #app {
+  position: relative;
+  width: var(--stage-w);
+  height: var(--stage-h);
+  overflow: hidden;
+  border-radius: 28px;
+  background: var(--bg);
+  box-shadow: 0 0 0 8px #120e0b, 0 0 0 10px #4a3b2c, 0 32px 90px rgba(0, 0, 0, 0.65);
+}
+
+/* Taro H5 路由页底色跟随宣纸，避免转场白闪。 */
+.taro_page {
+  background: #ece3d0 !important;
 }

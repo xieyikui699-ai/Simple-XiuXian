@@ -24,6 +24,18 @@ export function formatDelta(value: number): string {
   return value > 0 ? `+${formatNumber(value)}` : formatNumber(value);
 }
 
+/** 突破真元需求展示：顶点境界需求为 Infinity，显示作 ∞。 */
+export function formatZhenyuanRequirement(requiredZhenyuan: number): string {
+  return Number.isFinite(requiredZhenyuan) ? formatNumber(requiredZhenyuan) : "∞";
+}
+
+/** 存档保存时刻展示：MM-DD HH:mm。 */
+export function formatDateTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  const pad = (value: number) => value.toString().padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 /** 境界等级着色（展示层映射，非游戏规则）。 */
 export function realmToneClass(realmLevel: number): string {
   if (realmLevel >= 10) return "tone-nascent";
@@ -40,5 +52,4 @@ export const GENDER_DISPLAY_NAMES: Record<"male" | "female", string> = {
 export const BREAKTHROUGH_OUTCOME_LABELS: Record<string, string> = {
   success: "突破成功",
   failure: "突破失败",
-  ascended: "白日飞升",
 };

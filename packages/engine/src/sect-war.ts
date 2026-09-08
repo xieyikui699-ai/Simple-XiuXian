@@ -23,9 +23,9 @@ export const WAR_MORALE_DELTA = 5;
 /** 会战参战弟子：内门弟子 + 当月剩余禁战月数（由伤势模型换算，0/缺省 = 可出战）。 */
 export type WarEligibleDisciple = Disciple & { injuryMonthsLeft?: number };
 
-/** 会战参战资格：内门弟子且无未愈伤势（injuryMonthsLeft > 0 = 仍在禁战期）。 */
+/** 会战参战资格：无未愈伤势（injuryMonthsLeft > 0 = 仍在禁战期；名册全员内门，外门只是数字不参战）。 */
 export function isWarEligible(disciple: WarEligibleDisciple): boolean {
-  return disciple.role === "inner" && !(disciple.injuryMonthsLeft && disciple.injuryMonthsLeft > 0);
+  return !(disciple.injuryMonthsLeft && disciple.injuryMonthsLeft > 0);
 }
 
 /** 由弟子伤势模型换算当月剩余禁战月数（untilTurn 当月含仍禁战）。 */

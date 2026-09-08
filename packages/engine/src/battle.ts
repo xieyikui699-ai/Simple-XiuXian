@@ -23,13 +23,13 @@ import type { RootElement } from "./roots.js";
 
 /** 命中率 90 固定（百分点）。 */
 export const HIT_RATE = 90;
-/** 暴伤倍率：暴击对取整后基础伤害再 ×1.5。 */
-export const CRIT_MULTIPLIER = 1.5;
+/** 暴伤倍率：暴击对取整后基础伤害再 ×2。 */
+export const CRIT_MULTIPLIER = 2;
 /** 普通攻伐倍率（物理 1.0×）。 */
 export const BASIC_ATTACK_MULTIPLIER = 1;
 /** 最多 30 回合，未分胜负判平（双方无伤势）。 */
 export const MAX_BATTLE_ROUNDS = 30;
-/** 防御减伤系数：伤害 = max(1, round(攻击×倍率 − 防御×0.8))；暴击对取整后基础伤害再 ×1.5。 */
+/** 防御减伤系数：伤害 = max(1, round(攻击×倍率 − 防御×0.8))；暴击对取整后基础伤害再 ×2。 */
 export const DEFENSE_MITIGATION = 0.8;
 /** 战败伤势：40% 轻伤（禁战 1 月）、20% 重伤（禁战 3 月）、其余无伤。 */
 export const DEFEAT_LIGHT_INJURY_PCT = 40;
@@ -118,7 +118,7 @@ export type RunBattleContext = {
   turn?: number;
 };
 
-/** 伤害公式：max(1, round(攻击×倍率 − 防御×0.8×(1−无视防御%)))；暴击对基础伤害再 ×1.5。 */
+/** 伤害公式：max(1, round(攻击×倍率 − 防御×0.8×(1−无视防御%)))；暴击对基础伤害再 ×2。 */
 export function computeDamage(params: {
   attack: number;
   multiplier: number;
@@ -211,13 +211,18 @@ function pushEntry(
       Pick<BattleActionEntry, "hpLoss" | "shieldAbsorbed" | "lifestealHeal" | "reflectDamage">
     >,
 ): void {
-  actions.push({
+  const action = {
     hpLoss: 0,
     shieldAbsorbed: 0,
     lifestealHeal: 0,
     reflectDamage: 0,
     ...entry,
-  });
+  };
+  // 可选字段不落 undefined 键：快照走 JSON 序列化会丢键，内存态须与存档往返一致（D-022）。
+  for (const key of ["spellId", "hit", "crit"] as const) {
+    if (action[key] === undefined) delete action[key];
+  }
+  actions.push(action);
 }
 
 /** 行动前结算：冰冻跳过行动并消耗冰冻回合。 */

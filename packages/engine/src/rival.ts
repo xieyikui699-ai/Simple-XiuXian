@@ -2,19 +2,23 @@
 // 生成与月度运行时（E04-F01）+ 宣战判定与相遇接线（E04-F02）。
 // 纯函数、确定性：弟子用与玩家同一 generateDisciple 生成器（seed 命名空间 ":rival"），
 // 掷骰一律 sha256（hash.deterministicRoll），禁 Math.random；同 seed 双跑恒等。
-// NPC 不服丹、不研读功法法术（装备即战力）；难度 ×0.8/1.0/1.2 作用于真元收益与招募频率。
+// NPC 不服丹、不研读功法法术（装备即战力）；难度 ×0.8/1.0/1.2 作用于月度真元收益。
 import { generateDisciple } from "./generation.js";
 import { deterministicRoll } from "./hash.js";
-import { nextRealmStage, realmStageForLevel } from "./realms.js";
-import { RECRUIT_COST, sectLimitsFor, upgradeRequirementFor } from "./sect.js";
+import {
+  TOP_REALM_LEVEL,
+  lifespanIncreaseForRealmLevel,
+  nextRealmStage,
+  realmStageForLevel,
+} from "./realms.js";
+import { sectLimitsFor, upgradeRequirementFor } from "./sect.js";
 import { currentSuccessRate, monthlyZhenyuanGain } from "./settlement.js";
 import type { Disciple, GameState } from "./state.js";
 
 // ─── 生成参数（设计 §NPC 对手宗门：开局与玩家同为 1 级宗门）──────────────
 
 export const RIVAL_INITIAL_INNER_DISCIPLES = 3;
-export const RIVAL_INITIAL_OUTER_DISCIPLES = 20;
-/** NPC 亦按内门俸禄口径支付掌门俸禄（经济简算：外门供奉 − 内门俸禄 − 招募费）。 */
+/** NPC 亦按内门俸禄口径支付掌门俸禄（经济简算：外门供奉 − 内门俸禄）。 */
 export const RIVAL_LEADER_EXTRA_INNER = 1;
 
 /** 难度三档：发展速度倍率（作用于 NPC 月度真元收益与招募频率）。 */
@@ -40,9 +44,9 @@ export type RivalSect = {
   leaderId: string;
   /** 对手弟子编号单调计数（id 与取名 ordinal）。 */
   discipleSeq: number;
+  // 外门人数不入快照：恒等于 sectLimitsFor(sectRank).outerLimit，与玩家同口径。
+  /** 在册内门弟子（含掌门）。 */
   disciples: Disciple[];
-  /** 招募频率小数配额结转（rivalRecruitPlan 消费）。 */
-  recruitCarry: number;
 };
 
 /** NPC 宗门名（未显式指定时按 seed 确定性选取）。 */
@@ -58,7 +62,7 @@ const RIVAL_SECT_NAMES = [
 ] as const;
 
 /**
- * 创建 NPC 对手宗门：掌门 1 + 内门 3 + 外门 20，1 级宗门、灵石 2000、士气 70、声望 50。
+ * 创建 NPC 对手宗门：掌门 1 + 内门 3（外门恒按宗门等级上限满员、不入名册），1 级宗门、灵石 2000、士气 70、声望 50。
  * 弟子用与玩家同一生成器（同一 seed 命名空间下不重名）；内门按当前等级自动配最强装备档。
  */
 export function createRivalSect(input: {
@@ -89,11 +93,10 @@ export function createRivalSect(input: {
     leaderId: "r-1",
     discipleSeq: 0,
     disciples: [],
-    recruitCarry: 0,
   };
 
   const usedNames: string[] = [];
-  const spawn = (age: number, role: Disciple["role"]) => {
+  const spawn = (age: number) => {
     rival.discipleSeq += 1;
     const disciple = generateDisciple({
       gameSeed: `${seed}:rival`,
@@ -101,60 +104,46 @@ export function createRivalSect(input: {
       ordinal: rival.discipleSeq,
       usedNames,
       age,
-      role,
     });
     usedNames.push(disciple.name);
     rival.disciples.push(disciple);
   };
 
-  // 掌门 + 内门（起始年龄略长于玩家新收弟子，体现老牌宗门底蕴）。
-  spawn(24, "inner");
-  for (const age of [21, 19, 17]) spawn(age, "inner");
-  for (let i = 0; i < RIVAL_INITIAL_OUTER_DISCIPLES; i++) spawn(16, "outer");
+  // 掌门 + 内门（起始年龄略长于玩家新收弟子，体现老牌宗门底蕴）；外门恒满员，不入名册。
+  spawn(24);
+  for (const age of [21, 19, 17]) spawn(age);
 
   equipRivalInner(rival);
   return rival;
 }
 
-/** 内门弟子按当前宗门等级重配最强装备档（升阶后自动换装；外门不战斗不配装）。 */
+/** 名册弟子按当前宗门等级重配最强法宝档（升阶后自动换装）。 */
 function equipRivalInner(rival: RivalSect): void {
   const tier = rivalGearTierForRank(rival.sectRank);
   for (const disciple of rival.disciples) {
-    if (disciple.role !== "inner") continue;
-    disciple.equippedGear = { weapon: tier, armor: tier, accessory: tier, talisman: tier };
+    disciple.equippedGear = { talisman: tier };
   }
-}
-
-// ─── 招募频率：难度小数配额进位（0.8 → 月均 0.8 次 / 1.2 → 月均 1.2 次）──
-
-export type RivalRecruitPlan = { recruits: number; carryOut: number };
-
-/** 配额进位：carryIn + difficulty 的整数部分为本月招募数，小数部分结转（0.1 精度取整避免浮尘）。 */
-export function rivalRecruitPlan(difficulty: number, carryIn: number): RivalRecruitPlan {
-  const total = Math.round((carryIn + difficulty) * 10) / 10;
-  const recruits = Math.floor(total);
-  const carryOut = Math.round((total - recruits) * 10) / 10;
-  return { recruits, carryOut };
 }
 
 // ─── 月度运行时（与玩家月结同帧推进；纯函数返回新 RivalSect）────────────
 
 /**
  * NPC 月度推进：① 经济简算（外门供奉 − 内门俸禄）→ ② 内门真元/突破（同玩家公式 ×难度）
- * → ③ 升阶条件满足自动升阶（并按新等级重配装备）→ ④ 按频率招募外门（灵石充足时，300/人）。
+ * → ③ 升阶条件满足自动升阶（并按新等级重配装备；外门总数随等级上限扩容）。
  * NPC 不服丹、不研读、不做衰老坐化（设计 §月度运行时 未列；寿元字段仅作数据扩展位）。
  */
 export function advanceRivalSectMonthly(rivalInput: Readonly<RivalSect>, turn: number): RivalSect {
   const rival = structuredClone(rivalInput) as RivalSect;
 
-  // ① 经济简算：外门供奉 = 外门人数 × 2；内门俸禄 = 内门人数（含掌门）× 10。
-  const outerCount = rival.disciples.filter((disciple) => disciple.role === "outer").length;
-  const innerCount = rival.disciples.filter((disciple) => disciple.role === "inner").length;
-  rival.spiritStones += outerCount * 2 - innerCount * 10;
+  // ① 经济简算：外门供奉 = 外门人数（恒等于等级上限）× 2；内门俸禄 = 内门人数（含掌门）× 10。
+  const innerCount = rival.disciples.length;
+  const outerTotal = sectLimitsFor(rival.sectRank).outerLimit;
+  rival.spiritStones += outerTotal * 2 - innerCount * 10;
 
   // ② 内门真元与突破（与玩家同一公式；难度倍率作用于月度真元收益）。
   for (const disciple of rival.disciples) {
-    if (disciple.role !== "inner") continue;
+    // 元婴前期即修行尽头：圆满弟子不再积累真元、不再尝试突破（与玩家侧同规）。
+    if (disciple.realmLevel >= TOP_REALM_LEVEL) continue;
     const gain = monthlyZhenyuanGain({ morale: rival.morale } as GameState, disciple);
     disciple.zhenyuan += Math.round(gain * rival.difficulty);
     const stage = realmStageForLevel(disciple.realmLevel);
@@ -170,9 +159,11 @@ export function advanceRivalSectMonthly(rivalInput: Readonly<RivalSect>, turn: n
     }
     disciple.breakthroughFailures = 0;
     const next = nextRealmStage(disciple.realmLevel);
-    if (!next) continue; // NPC 至元婴前期圆满后止步（飞升为玩家专属结局）。
+    if (!next) continue;
     disciple.realm = next.realm;
     disciple.realmLevel = next.level;
+    // 与玩家同规：大境界突破寿元直接写入 maxLifespan（NPC 不衰老，仅保持数据同口径）。
+    disciple.maxLifespan += lifespanIncreaseForRealmLevel(next.level);
   }
 
   // ③ 升阶条件满足自动升阶（与玩家同表：筑基+5000 / 金丹×3+30000）。
@@ -183,16 +174,12 @@ export function advanceRivalSectMonthly(rivalInput: Readonly<RivalSect>, turn: n
     const stonesEnough = rival.spiritStones >= requirement.cost;
     const realmEnough =
       minRealmLevel !== undefined
-        ? rival.disciples.some(
-            (disciple) => disciple.role === "inner" && disciple.realmLevel >= minRealmLevel,
-          )
+        ? rival.disciples.some((disciple) => disciple.realmLevel >= minRealmLevel)
         : true;
     const goldenCoreEnough =
       goldenCoreCount !== undefined
-        ? rival.disciples.filter(
-            (disciple) =>
-              disciple.role === "inner" && disciple.realmLevel >= realmStageForLevel(7).level,
-          ).length >= goldenCoreCount
+        ? rival.disciples.filter((disciple) => disciple.realmLevel >= realmStageForLevel(7).level)
+            .length >= goldenCoreCount
         : true;
     if (stonesEnough && realmEnough && goldenCoreEnough) {
       rival.spiritStones -= requirement.cost;
@@ -201,29 +188,7 @@ export function advanceRivalSectMonthly(rivalInput: Readonly<RivalSect>, turn: n
     }
   }
 
-  // ④ 招募：频率配额进位；单次招募需灵石充足（300/人），不足则放弃当月余量。
-  const plan = rivalRecruitPlan(rival.difficulty, rival.recruitCarry);
-  rival.recruitCarry = plan.carryOut;
-  const usedNames = rival.disciples.map((disciple) => disciple.name);
-  // 外门容量按宗门等级约束（设计 §宗门体系：100/300/500），满员则放弃当月余量。
-  const outerCapacity = sectLimitsFor(rival.sectRank).outerLimit;
-  let currentOuter = rival.disciples.filter((disciple) => disciple.role === "outer").length;
-  for (let i = 0; i < plan.recruits; i++) {
-    if (rival.spiritStones < RECRUIT_COST) break;
-    if (currentOuter >= outerCapacity) break;
-    rival.spiritStones -= RECRUIT_COST;
-    rival.discipleSeq += 1;
-    const disciple = generateDisciple({
-      gameSeed: `${rival.seed}:rival`,
-      discipleId: `r-${rival.discipleSeq}`,
-      ordinal: rival.discipleSeq,
-      usedNames,
-      role: "outer",
-    });
-    usedNames.push(disciple.name);
-    rival.disciples.push(disciple);
-    currentOuter += 1;
-  }
+  // 外门恒按宗门等级上限满员，无流动/招募步（升阶即扩容，见 sectLimitsFor 派生口径）。
 
   return rival;
 }
@@ -314,7 +279,7 @@ export function declareWar(stateInput: Readonly<GameState>): GameState {
 }
 
 // ─── 声望规则（设计 §声望 D-019；golden 契约见 rival.test.ts）────────────
-// 历练 +1 由月结方针承担；切磋 +2/−1（平 0）；会战 ±10；
+// 切磋 +2/−1（平 0）；会战 ±10；
 // 大境界突破（进入 4/7/10 级）+3；下限 0、无月度消退。
 
 /** 大境界突破的实力等级节点（进入 4/7/10 级时声望 +3）。 */
@@ -348,8 +313,8 @@ export function applyPrestigeDelta(current: number, delta: number): number {
 // ─── 相遇接线（E04-F02：历练切磋/掠夺的对位注入）────────────────────────
 
 /**
- * 从对手宗门确定性选取一名可出战内门弟子（切磋/掠夺对位；掷骰 seed 由调用方传入）。
- * 可出战 = 内门（含掌门）且伤势已愈（与玩家 combatReadyDisciples 同一口径）。
+ * 从对手宗门确定性选取一名可出战弟子（切磋/掠夺对位；掷骰 seed 由调用方传入）。
+ * 可出战 = 无未愈伤势（名册全员内门，与玩家 combatReadyDisciples 同一口径；外门只是数字不参战）。
  */
 export function pickRivalOpponent(
   rival: Readonly<RivalSect>,
@@ -357,8 +322,7 @@ export function pickRivalOpponent(
   turn: number,
 ): Disciple | undefined {
   const eligible = rival.disciples.filter(
-    (disciple) =>
-      disciple.role === "inner" && !(disciple.injury && disciple.injury.untilTurn >= turn),
+    (disciple) => !(disciple.injury && disciple.injury.untilTurn >= turn),
   );
   if (eligible.length === 0) return undefined;
   const index = Math.floor((deterministicRoll(rollSeed) / 100) * eligible.length);

@@ -1,92 +1,147 @@
-.overview-head {
+/* 主殿：宗门概况卡 + 方针/结果 + 管理入口 + 底部推进栏。 */
+.sect-card {
+  background: linear-gradient(165deg, #fdfaf1, #f6eeda);
+}
+
+.sect-head {
   display: flex;
   flex-direction: row;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20rpx;
+}
+
+.sect-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 36rpx;
+  font-weight: 700;
+  letter-spacing: 2rpx;
+}
+
+.sect-head-right {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16rpx;
+  margin-left: 16rpx;
+  flex: 0 0 auto;
+}
+
+.upgrade-cost {
+  color: var(--muted);
+  font-size: 22rpx;
+  white-space: nowrap;
+}
+
+.sect-turn {
+  color: var(--muted);
+  font-size: 24rpx;
 }
 
 .stat-grid {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
+  gap: 14rpx;
 }
 
 .stat {
-  width: 33%;
+  flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 12rpx 0;
+  align-items: center;
+  background: var(--card-2);
+  border: 2rpx solid var(--line);
+  border-radius: 14rpx;
+  padding: 14rpx 4rpx 12rpx;
+  min-width: 0;
 }
 
 .stat-value {
-  font-size: 32rpx;
-  font-weight: 600;
+  font-size: 30rpx;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-label {
-  color: #8a7d6a;
+  color: var(--muted);
+  font-size: 20rpx;
+  margin-top: 4rpx;
+}
+
+.sect-subline {
+  display: block;
+  margin-top: 16rpx;
+  color: var(--muted);
   font-size: 22rpx;
 }
 
-.policy-row {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 16rpx;
-}
-
-.policy-chip {
-  border: 2rpx solid #c9b998;
-  border-radius: 24rpx;
-  padding: 8rpx 24rpx;
-  color: #6b5b45;
-}
-
-.policy-chip-active {
-  background: #7a4f2b;
-  border-color: #7a4f2b;
-  color: #fff;
-}
-
-.advance-row {
-  justify-content: space-between;
-  margin-top: 20rpx;
-}
-
+/* 底部推进栏 */
 .btn-advance {
-  background: #7a4f2b;
+  flex: 1;
+  height: 92rpx;
+  line-height: 92rpx;
+  font-size: 32rpx;
+  letter-spacing: 4rpx;
+  padding: 0;
+  background: var(--accent);
   color: #fff;
-  width: 260rpx;
+  border-radius: 18rpx;
+  box-shadow: 0 8rpx 20rpx rgba(110, 61, 26, 0.3);
+}
+
+.btn-advance[disabled="true"] {
+  background: var(--accent);
+  color: #fff;
+  opacity: 0.45;
+  box-shadow: none;
 }
 
 .auto-wrap {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: center;
-  gap: 12rpx;
+  gap: 4rpx;
+  padding: 0 6rpx;
 }
 
+.auto-label {
+  font-size: 20rpx;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* 月结结果 */
 .result-card {
   border-color: #d9a05b;
+  background: linear-gradient(160deg, #fdf6e9, #f8ecd4);
 }
 
 .result-head {
   display: flex;
   flex-direction: row;
+  align-items: center;
   justify-content: space-between;
+  width: 100%;
 }
 
 .result-close {
-  color: #8a7d6a;
+  color: var(--accent);
   font-size: 24rpx;
+  padding: 4rpx 8rpx;
 }
 
 .result-line {
   display: block;
   font-size: 26rpx;
-  margin-top: 8rpx;
+  margin-top: 10rpx;
+  line-height: 1.55;
 }
 
+/* 管理入口 */
 .nav-grid {
   display: flex;
   flex-direction: row;
@@ -95,41 +150,78 @@
 }
 
 .nav-cell {
-  width: 208rpx;
+  width: calc((100% - 32rpx) / 3);
+  box-sizing: border-box;
   text-align: center;
-  background: #f4efe4;
-  border: 2rpx solid #e3d9c6;
-  border-radius: 12rpx;
-  padding: 20rpx 0;
+  background: var(--card-2);
+  border: 2rpx solid var(--line);
+  border-radius: 14rpx;
+  padding: 24rpx 0;
+  font-size: 27rpx;
+  position: relative;
+  overflow: hidden;
 }
 
-.upgrade-row {
+.nav-cell::after {
+  content: "›";
+  position: absolute;
+  right: 14rpx;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 26rpx;
+}
+
+.btn-upgrade {
+  background: var(--green);
+  color: #fff;
+  height: 56rpx;
+  line-height: 56rpx;
+  padding: 0 24rpx;
+  font-size: 24rpx;
+  flex: 0 0 auto;
+}
+
+.btn-upgrade[disabled="true"] {
+  background: var(--card-2);
+  color: var(--muted);
+  border: 2rpx solid var(--line);
+}
+
+/* 外门挖矿滑杆 */
+.mining-box {
+  padding: 16rpx;
+  background: var(--card-2);
+  border: 2rpx solid var(--line);
+  border-radius: 14rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.mining-row {
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 16rpx;
-  margin-top: 20rpx;
 }
 
-.btn-upgrade {
-  background: #3c7a5a;
-  color: #fff;
-  width: 240rpx;
+.mining-label {
+  flex-shrink: 0;
 }
 
-.save-row-group {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 12rpx;
-  margin-top: 20rpx;
-}
-
-.btn-save {
+.mining-count {
+  margin-left: auto;
   font-size: 24rpx;
-  padding: 0 20rpx;
-  line-height: 56rpx;
-  height: 56rpx;
-  background: #fffdf7;
-  border: 2rpx solid #c9b998;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.mining-slider {
+  margin: 8rpx 8rpx 0;
+}
+
+.mining-hint {
+  display: block;
+  font-size: 22rpx;
 }

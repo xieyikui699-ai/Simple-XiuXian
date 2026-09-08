@@ -8,12 +8,10 @@ import type { RivalSect } from "./rival.js";
 import type { RootElement, RootType } from "./roots.js";
 import type { SectWarRecord } from "./sect-war.js";
 
-export type DiscipleRole = "inner" | "outer";
-
 /** 伤势档位：轻伤禁战 1 月 / 重伤禁战 3 月（与 battle.ts 战败伤势同词汇表）。 */
 export type InjuryKind = "light" | "severe";
 
-/** 伤势：untilTurn 当回目（含）仍禁战，下一回目起可出战；休养方针恢复月数 −2。 */
+/** 伤势：untilTurn 当回目（含）仍禁战，下一回目起可出战（恢复按回目自然到期）。 */
 export type Injury = {
   kind: InjuryKind;
   untilTurn: number;
@@ -31,7 +29,6 @@ export type Disciple = {
   realmLevel: number;
   zhenyuan: number;
   breakthroughFailures: number;
-  role: DiscipleRole;
   rootType: RootType;
   rootElements: RootElement[];
   attributes: DiscipleAttributes;
@@ -48,15 +45,6 @@ export type Disciple = {
   injury?: Injury;
 };
 
-export type MonthlyPolicy = "cultivate" | "develop" | "explore" | "rest";
-
-export const POLICY_DISPLAY_NAMES: Record<MonthlyPolicy, string> = {
-  cultivate: "闭关修炼",
-  develop: "经营宗门",
-  explore: "外出历练",
-  rest: "休养生息",
-};
-
 export type ChronicleKind = "normal" | "milestone" | "warning";
 
 export type ChronicleEntry = {
@@ -65,7 +53,7 @@ export type ChronicleEntry = {
   text: string;
 };
 
-export type EndingKind = "ascension" | "annexation" | "annexed" | "bankrupt";
+export type EndingKind = "annexation" | "annexed" | "bankrupt";
 
 /** 仙途评级四档（设计 §胜负与结局评价；阈值见 settlement.ENDING_RATING_THRESHOLDS）。 */
 export type EndingRating = "甲" | "乙" | "丙" | "丁";
@@ -91,20 +79,29 @@ export type SectLibrary = {
   spellIds: string[];
 };
 
-/** 在炉丹药任务：出炉剩余月数。 */
-export type FurnaceTask = {
-  pillId: string;
-  monthsLeft: number;
-};
+/**
+ * 在炉任务（丹房 = 炼丹、器坊 = 装备槽档；挂任务免费，月结按投入人手推进点数并扣月耗）。
+ * 丹房不选丹方：点数统一（PILL_TASK_POINTS），满点出炉时在两种丹药中随机（各 50%）。
+ * accumulatedPoints 为浮点累积（主持加速为乘算小数），满 totalPoints 即出炉。
+ */
+export type WorkshopTask =
+  | { kind: "pill"; accumulatedPoints: number }
+  | { kind: "gear"; slot: GearSlot; tier: GearTier; accumulatedPoints: number };
 
-/** 车间（丹房/器坊）状态：岗位分配、累积点数、在炉任务。 */
+/**
+ * 车间（丹房/器坊）状态：外门投入制（参考完整版 crafting-v2，简化掉多炉与成功率）。
+ * - masters（沿用 workers 字段名）：主持弟子（丹师/工匠）至多 1 名，境界越高加成越高
+ *   （每境界等级 +20%，元婴前期 +200% 封顶；无主持照常开工）。
+ * - assignedOuter：投入的外门弟子人数（≥1 即自动开炉挂默认任务）；两房合计 ≤ 外门总数，人数越多推进越快。
+ * - task：在炉任务；满点自动出炉入仓库并连炉（进度清零续炼同任务，换任务即打断）。
+ */
 export type WorkshopState = {
-  /** 岗位分配（丹师/工匠的 discipleId，至多 2 名）。 */
+  /** 主持弟子（丹师/工匠的 discipleId，至多 1 名；不战斗不修炼）。 */
   workers: string[];
-  /** 已累积未消耗的炼制点数。 */
-  points: number;
-  /** 在炉任务（器坊开炉即出炉，恒为空）。 */
-  tasks: FurnaceTask[];
+  /** 投入的外门弟子人数（外门只是数字；0 = 停工）。 */
+  assignedOuter: number;
+  /** 在炉任务（null = 空闲）。 */
+  task: WorkshopTask | null;
 };
 
 /** 岗位与生产扩展字段（GameSnapshot jobs；旧档缺字段按空车间口径兼容）。 */
@@ -132,6 +129,16 @@ export type SectElders = {
   war?: string;
 };
 
+/** 外门分工：挖矿/练气各岗在编人数（丹房/器坊投入记在车间 assignedOuter；旧档缺省 = 全员供奉）。 */
+export type OuterJobsState = {
+  mining: number;
+  qi: number;
+};
+
+export function emptyOuterJobs(): OuterJobsState {
+  return { mining: 0, qi: 0 };
+}
+
 export type GameState = {
   seed: string;
   sectName: string;
@@ -143,8 +150,11 @@ export type GameState = {
   prestige: number;
   /** 弟子编号单调计数，用于生成 id 与取名 ordinal。 */
   discipleSeq: number;
-  /** 当前方针（本月结算所用），仅结算期间有语义。 */
-  policy?: MonthlyPolicy;
+  // 外门人数不入状态：外门弟子只是数字，总数恒等于当前宗门等级的外门上限（sectLimitsFor），
+  // 开局即满员、升阶即扩容；在岗分工见 outerJobs 与 jobs[...].assignedOuter。
+  /** 外门分工：挖矿/练气在编人数（丹房/器坊投入在 jobs[...].assignedOuter；旧档缺省 = 全员供奉）。 */
+  outerJobs?: OuterJobsState;
+  /** 在册内门弟子（有名有姓、可战斗修炼管理；外门不入此册）。 */
   disciples: Disciple[];
   chronicle: ChronicleEntry[];
   fallen: FallenDisciple[];
@@ -173,12 +183,12 @@ export type GameState = {
   sectWars?: SectWarRecord[];
   /** 凋敝计数：内门 0 且灵石不足招募费的连续月数（≥6 触发凋敝结局）。 */
   bankruptStreak?: number;
-  /** 突破成功总次数（含飞升；结局评价输入）。 */
+  /** 突破成功总次数（结局评价输入）。 */
   totalBreakthroughs?: number;
 };
 
 export function emptyWorkshop(): WorkshopState {
-  return { workers: [], points: 0, tasks: [] };
+  return { workers: [], assignedOuter: 0, task: null };
 }
 
 export function emptySectJobs(): SectJobs {
@@ -193,6 +203,36 @@ export function emptyLibrary(): SectLibrary {
   return { techniqueIds: [], spellIds: [] };
 }
 
+/**
+ * 旧档迁移：外门个体名册 → 外门恒满员口径（外门弟子只是数字，总数恒等于宗门等级上限）。
+ * - 残留的 role 字段自弟子身上剥离（新口径全员内门，字段已废除）；
+ * - 旧档的 outerCount 字段（初始 20/流动计数时代）删除——总数改为按 sectRank 派生，不入状态。
+ * 新局状态本就是新口径，迁移为幂等空操作。
+ */
+export function migrateGameState(raw: Readonly<GameState>): GameState {
+  const state = structuredClone(raw) as GameState;
+  const roleOf = (disciple: unknown): string | undefined =>
+    (disciple as { role?: string } | undefined)?.role;
+  Reflect.deleteProperty(state as GameState & { outerCount?: number }, "outerCount");
+  state.disciples = state.disciples
+    .filter((disciple) => roleOf(disciple) !== "outer")
+    .map((disciple) => {
+      const { role: _obsoleteRole, ...rest } = disciple as Disciple & { role?: string };
+      return rest as Disciple;
+    });
+  if (state.rival) {
+    const rival = state.rival as GameState["rival"] & { outerCount?: number };
+    Reflect.deleteProperty(rival, "outerCount");
+    rival.disciples = rival.disciples
+      .filter((disciple) => roleOf(disciple) !== "outer")
+      .map((disciple) => {
+        const { role: _obsoleteRole, ...rest } = disciple as Disciple & { role?: string };
+        return rest as Disciple;
+      });
+  }
+  return state;
+}
+
 /** 车间键序（丹房在前，与月结生产步骤口径一致）。 */
 export const CRAFT_JOB_KINDS: readonly CraftJobKind[] = ["pill", "gear"];
 
@@ -201,7 +241,7 @@ export type RecruitmentCandidate = {
   disciple: Disciple;
 };
 
-export type BreakthroughOutcome = "success" | "failure" | "ascended";
+export type BreakthroughOutcome = "success" | "failure";
 
 export type BreakthroughEvent = {
   discipleId: string;
@@ -210,6 +250,9 @@ export type BreakthroughEvent = {
   fromRealmLevel: number;
   toRealmLevel?: number;
   successRate: number;
+  /** 突破顿悟：本次突破成功时顿悟到的法术（20% 概率；未触发缺省）。 */
+  epiphanySpellId?: string;
+  epiphanySpellName?: string;
 };
 
 export type DeathEvent = {
@@ -218,16 +261,14 @@ export type DeathEvent = {
   age: number;
 };
 
+/** 外门递补入内门事件（外门只是数字，递补即从外门计数转入新内门弟子）。 */
 export type PromotionEvent = {
   discipleId: string;
   discipleName: string;
-  from: DiscipleRole;
-  to: DiscipleRole;
 };
 
 export type SettlementResult = {
   turn: number;
-  policy: MonthlyPolicy;
   crisis: boolean;
   spiritStonesDelta: number;
   moraleDelta: number;
@@ -235,7 +276,11 @@ export type SettlementResult = {
   breakthroughs: BreakthroughEvent[];
   deaths: DeathEvent[];
   promotions: PromotionEvent[];
-  /** 方针=外出历练时的遭遇事件报告（第 5 步；其余方针缺省）。 */
+  /** 本月出炉入仓库的丹药（第 ④ 步生产；无出炉则缺省）。 */
+  completedPills?: Array<{ pillId: string; count: number }>;
+  /** 本月出炉入仓库的装备（第 ④ 步生产；无出炉则缺省）。 */
+  completedGear?: WarehouseGearItem[];
+  /** 每月自动进行的历练遭遇事件报告（第 5 步；危机月停摆缺省）。 */
   expedition?: ExpeditionReport;
   /** 会战结算记录（第 7 步触发时携带）。 */
   war?: SectWarRecord;

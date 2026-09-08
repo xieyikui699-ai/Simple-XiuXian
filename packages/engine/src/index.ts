@@ -15,6 +15,7 @@ export * from "./expedition.js";
 export * from "./rival.js";
 export * from "./sect-war.js";
 export * from "./sect.js";
+export * from "./outer-jobs.js";
 export * from "./generation.js";
 export * from "./settlement.js";
 export * from "./engine.js";

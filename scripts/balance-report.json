@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-06T18:52:15.266Z",
+  "generatedAt": "2026-09-07T14:47:36.653Z",
   "gamesPerTier": 400,
   "maxMonths": 7200,
   "tiers": {
@@ -11,25 +11,25 @@
       "bankrupt": 0,
       "timeout": 0,
       "ascensionYears": {
-        "p25": 30.166666666666668,
-        "median": 35.916666666666664,
-        "p75": 42.166666666666664,
-        "mean": 36.436458333333306
+        "p25": 22.916666666666668,
+        "median": 30.75,
+        "p75": 40.916666666666664,
+        "mean": 33.306250000000006
       },
       "annexationPct": 0,
       "annexedPct": 0,
       "bankruptPct": 0,
-      "diffOkMedianShare": 0.9103690685413005,
+      "diffOkMedianShare": 0.7541284403669725,
       "rankDiffOkMedianShare": 1,
-      "meanWars": 9.0025,
-      "meanDeaths": 0.1225,
+      "meanWars": 9.7225,
+      "meanDeaths": 0,
       "anchors": {
         "medianAscensionWithin30to60": true,
         "annexationAtMost25Pct": true,
         "annexedAtMost25Pct": true,
         "levelDiffMostlyWithin1": true
       },
-      "elapsedMs": 1086800
+      "elapsedMs": 1055147
     },
     "standard": {
       "games": 400,
@@ -39,25 +39,25 @@
       "bankrupt": 0,
       "timeout": 0,
       "ascensionYears": {
-        "p25": 29.416666666666668,
-        "median": 36.916666666666664,
-        "p75": 43.083333333333336,
-        "mean": 36.705416666666665
+        "p25": 22.916666666666668,
+        "median": 31.166666666666668,
+        "p75": 40.333333333333336,
+        "mean": 32.51208333333333
       },
       "annexationPct": 0,
       "annexedPct": 0,
       "bankruptPct": 0,
-      "diffOkMedianShare": 0.9186351706036745,
+      "diffOkMedianShare": 0.839344262295082,
       "rankDiffOkMedianShare": 1,
-      "meanWars": 7.5575,
-      "meanDeaths": 0.195,
+      "meanWars": 7.965,
+      "meanDeaths": 0,
       "anchors": {
         "medianAscensionWithin30to60": true,
         "annexationAtMost25Pct": true,
         "annexedAtMost25Pct": true,
         "levelDiffMostlyWithin1": true
       },
-      "elapsedMs": 1050092
+      "elapsedMs": 820539
     },
     "hard": {
       "games": 400,
@@ -67,25 +67,25 @@
       "bankrupt": 0,
       "timeout": 0,
       "ascensionYears": {
-        "p25": 30.416666666666668,
-        "median": 36.25,
-        "p75": 43.333333333333336,
-        "mean": 37.40958333333336
+        "p25": 24.416666666666668,
+        "median": 31.5,
+        "p75": 40.833333333333336,
+        "mean": 33.11645833333333
       },
       "annexationPct": 0,
       "annexedPct": 0,
       "bankruptPct": 0,
-      "diffOkMedianShare": 0.9400921658986175,
+      "diffOkMedianShare": 0.9347258485639687,
       "rankDiffOkMedianShare": 1,
-      "meanWars": 5.94,
-      "meanDeaths": 0.2775,
+      "meanWars": 5.155,
+      "meanDeaths": 0,
       "anchors": {
         "medianAscensionWithin30to60": true,
         "annexationAtMost25Pct": true,
         "annexedAtMost25Pct": true,
         "levelDiffMostlyWithin1": true
       },
-      "elapsedMs": 1028159
+      "elapsedMs": 752479
     }
   }
 }

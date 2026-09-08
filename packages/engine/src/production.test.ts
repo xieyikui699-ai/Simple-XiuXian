@@ -1,21 +1,28 @@
-// 丹房/器坊生产切片测试：岗位 → 点数推进 → 开炉校验 → 出炉 → 旧档兼容 → 确定性。
+// 丹房/器坊生产切片测试：主持任命 → 外门投入（滑杆）→ 挂任务 → 月结推进（月耗/加速/封顶）
+// → 出炉连炉（丹方随机各半）→ 超编裁剪 → 旧档兼容（旧点数池/旧 pill 任务迁移）→ 确定性。
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { GearTier } from "./catalog.js";
 import { createGame } from "./engine.js";
+import { deterministicRoll } from "./hash.js";
 import {
   ADULT_AGE,
-  WORKSHOP_JOB_LIMIT,
+  GEAR_MONTHLY_PROGRESS_CAP_RATIO,
+  PILL_COST_PER_OUTER_MONTH,
+  PILL_TASK_POINTS,
+  WORKSHOP_MASTER_LIMIT,
   advanceWorkshops,
   assignWorkshopJob,
+  estimateCraftMonths,
   jobsOf,
   maxForgeTierForRank,
   removeWorkshopJob,
-  startGearCraft,
-  startPillCraft,
+  setWorkshopStaff,
+  startWorkshopTask,
   warehouseOf,
-  workerMonthlyPoints,
   workshopAppointmentBlockReason,
+  workshopPauseReason,
+  workshopSpeedMultiplier,
+  workshopTaskTotalPoints,
 } from "./production.js";
 import { settleMonthly } from "./settlement.js";
 import type { GameState } from "./state.js";
@@ -35,37 +42,43 @@ function stripM2Fields(state: GameState): GameState {
   return { ...legacy, disciples } as unknown as GameState;
 }
 
-/** 全链路场景：任命 → 攒 9 月点数（丹房/器坊各 90 点）→ 开 2 炉丹 + 2 件装备 → 推进出炉。 */
+function closeTo(actual: number, expected: number, epsilon = 1e-9): void {
+  assert.ok(
+    Math.abs(actual - expected) < epsilon,
+    `expected ${actual} ≈ ${expected} (±${epsilon})`,
+  );
+}
+
+function taskProgress(state: GameState, kind: "pill" | "gear"): number {
+  const task = jobsOf(state)[kind].task;
+  return task ? task.accumulatedPoints : -1;
+}
+
+/** 全链路场景：任命两房主持 → 投入外门（投入即自动开炉）→ 推进 4 月（丹/器各出炉 ≥1）。 */
 function productionScenario(seed: string): GameState {
   let state = newGame(seed);
   state = assignWorkshopJob(state, "pill", "d-1").state;
   state = assignWorkshopJob(state, "gear", "d-2").state;
-  for (let i = 0; i < 9; i++) {
-    state = advanceWorkshops(state).state;
-  }
-  state = { ...state, spiritStones: state.spiritStones + 5000 };
-  state = startPillCraft(state, "pill-yanshou").state;
-  state = startPillCraft(state, "pill-juling").state;
-  state = startGearCraft(state, "weapon", 1).state;
-  state = startGearCraft(state, "accessory", 2).state;
-  // 延寿丹 2 月周期：第 1 月未熟、第 2 月出炉；聚灵丹 1 月即熟。
-  for (let i = 0; i < 2; i++) {
+  state = setWorkshopStaff(state, "pill", 70).state;
+  state = setWorkshopStaff(state, "gear", 30).state;
+  state = startWorkshopTask(state, "pill", { kind: "pill" }).state;
+  state = startWorkshopTask(state, "gear", { kind: "gear", slot: "talisman", tier: 1 }).state;
+  for (let i = 0; i < 4; i++) {
     state = advanceWorkshops(state).state;
   }
   return state;
 }
 
-describe("岗位模型", () => {
-  it("无职成年内门弟子可任命，丹房/器坊各至多 2 岗", () => {
+describe("主持任命", () => {
+  it("无职成年弟子可任命，每房至多 1 名主持", () => {
     let state = newGame();
-    assert.equal(WORKSHOP_JOB_LIMIT, 2);
+    assert.equal(WORKSHOP_MASTER_LIMIT, 1);
     state = assignWorkshopJob(state, "pill", "d-1").state;
-    state = assignWorkshopJob(state, "pill", "d-2").state;
-    assert.deepEqual(jobsOf(state).pill.workers, ["d-1", "d-2"]);
-    assert.throws(() => assignWorkshopJob(state, "pill", "d-3"), /workshop_job_full/);
+    assert.deepEqual(jobsOf(state).pill.workers, ["d-1"]);
+    assert.throws(() => assignWorkshopJob(state, "pill", "d-2"), /workshop_job_full/);
   });
 
-  it("同一弟子不可兼任两车间（无职才可任命）", () => {
+  it("同一弟子不可兼任两房主持（长老互斥同口径）", () => {
     let state = newGame();
     state = assignWorkshopJob(state, "pill", "d-1").state;
     assert.throws(() => assignWorkshopJob(state, "gear", "d-1"), /disciple_job_busy/);
@@ -73,12 +86,9 @@ describe("岗位模型", () => {
     assert.deepEqual(jobsOf(state).gear.workers, ["d-2"]);
   });
 
-  it("任命校验：外门 / 未成年 / 不存在弟子", () => {
+  it("任命校验：未成年 / 不存在弟子（名册全员内门）", () => {
     const state = newGame();
-    const outer = state.disciples.find((entry) => entry.role === "outer");
-    assert.ok(outer);
-    assert.equal(workshopAppointmentBlockReason(state, "pill", outer.id), "disciple_not_inner");
-    const inner = state.disciples.find((entry) => entry.role === "inner" && entry.age >= ADULT_AGE);
+    const inner = state.disciples.find((entry) => entry.age >= ADULT_AGE);
     assert.ok(inner);
     const minor = { ...structuredClone(inner), id: "d-minor", age: ADULT_AGE - 1 };
     const withMinor = { ...structuredClone(state), disciples: [minor, ...state.disciples] };
@@ -89,221 +99,336 @@ describe("岗位模型", () => {
     assert.equal(workshopAppointmentBlockReason(state, "pill", "d-missing"), "disciple_not_found");
   });
 
-  it("卸任：只移除本车间在岗弟子", () => {
+  it("卸任：只移除本房主持", () => {
     let state = newGame();
     state = assignWorkshopJob(state, "pill", "d-1").state;
     state = removeWorkshopJob(state, "pill", "d-1").state;
     assert.deepEqual(jobsOf(state).pill.workers, []);
     assert.throws(() => removeWorkshopJob(state, "pill", "d-1"), /workshop_job_not_held/);
   });
-});
 
-describe("点数推进", () => {
-  it("1 岗 +10 点/月，丹道天赋丹师 +20% 乘算为 12", () => {
-    assert.equal(workerMonthlyPoints("pill", []), 10);
-    assert.equal(workerMonthlyPoints("pill", ["t-pill-talent"]), 12);
+  it("主持产速乘数：境界加成每级 +20%（元婴 +200% 封顶）、丹道天赋再 +20%、无主持恒 1", () => {
     let state = newGame();
+    assert.equal(workshopSpeedMultiplier(state, "pill"), 1);
     state = assignWorkshopJob(state, "pill", "d-1").state;
-    state = assignWorkshopJob(state, "gear", "d-2").state;
-    assert.equal(jobsOf(state).pill.points, 0);
-    assert.equal(jobsOf(state).gear.points, 0);
-    state = advanceWorkshops(state).state;
-    assert.equal(jobsOf(state).pill.points, 10);
-    assert.equal(jobsOf(state).gear.points, 10);
-    state = advanceWorkshops(state).state;
-    assert.equal(jobsOf(state).pill.points, 20);
-  });
-
-  it("丹道天赋只在丹房生效（车间天赋亲和）", () => {
-    let state = newGame();
+    // 练气前期（1 级）：境界加成 +20%。
+    assert.ok(Math.abs(workshopSpeedMultiplier(state, "pill") - 1.2) < 1e-9);
     const alchemist = state.disciples.find((entry) => entry.id === "d-1");
     assert.ok(alchemist);
     alchemist.talentIds = ["t-pill-talent"];
-    state = assignWorkshopJob(state, "pill", "d-2").state;
-    state = assignWorkshopJob(state, "gear", "d-1").state;
-    state = advanceWorkshops(state).state;
-    // 丹道天赋对器坊不加成：两车间都是 10。
-    assert.equal(jobsOf(state).pill.points, 10);
-    assert.equal(jobsOf(state).gear.points, 10);
-    state = removeWorkshopJob(state, "pill", "d-2").state;
-    state = removeWorkshopJob(state, "gear", "d-1").state;
-    state = assignWorkshopJob(state, "pill", "d-1").state;
-    state = advanceWorkshops(state).state;
-    assert.equal(jobsOf(state).pill.points, 10 + 12);
-    assert.equal(jobsOf(state).gear.points, 10);
-  });
-
-  it("坐化弟子自动离岗，不再产出点数", () => {
-    let state = newGame();
-    state = assignWorkshopJob(state, "pill", "d-1").state;
-    state.disciples = state.disciples.filter((entry) => entry.id !== "d-1");
-    state = advanceWorkshops(state).state;
-    assert.deepEqual(jobsOf(state).pill.workers, []);
-    assert.equal(jobsOf(state).pill.points, 0);
+    assert.ok(Math.abs(workshopSpeedMultiplier(state, "pill") - 1.4) < 1e-9);
+    // 元婴前期（10 级）：境界加成 +200% 封顶（天赋加成合计也挤不破顶）。
+    alchemist.realmLevel = 10;
+    assert.ok(Math.abs(workshopSpeedMultiplier(state, "pill") - 3) < 1e-9);
+    // 天赋不跨房：器坊无主持恒 1。
+    assert.equal(workshopSpeedMultiplier(state, "gear"), 1);
   });
 });
 
-describe("器坊开炉", () => {
-  it("宗门等级限档：1 级只可炼档 1–2，3 级档 1–4", () => {
+describe("外门投入（滑杆）", () => {
+  it("投入人数即时生效；两房合计不得超过外门总数", () => {
+    let state = newGame();
+    state = setWorkshopStaff(state, "pill", 60).state;
+    assert.equal(jobsOf(state).pill.assignedOuter, 60);
+    state = setWorkshopStaff(state, "gear", 40).state;
+    assert.equal(jobsOf(state).gear.assignedOuter, 40);
+    // 60 + 41 > 100 → 拒绝。
+    assert.throws(() => setWorkshopStaff(state, "pill", 61), /workshop_outer_insufficient/);
+    // 上调时另一房投入计入约束：外门 100 已占满（60+40），器坊加 1 即越界。
+    assert.throws(() => setWorkshopStaff(state, "gear", 41), /workshop_outer_insufficient/);
+  });
+
+  it("非法人数：负数 / 非整数 / 超单房上限", () => {
+    const state = newGame();
+    assert.throws(() => setWorkshopStaff(state, "pill", -1), /workshop_staff_invalid/);
+    assert.throws(() => setWorkshopStaff(state, "pill", 1.5), /workshop_staff_invalid/);
+    assert.throws(() => setWorkshopStaff(state, "pill", 501), /workshop_staff_over_cap/);
+  });
+});
+
+describe("在炉任务（挂任务免费，换任务进度作废）", () => {
+  it("挂炼丹任务不选丹方、不扣灵石（统一点数）；非法槽档 / 越档 / 房间不匹配拒绝", () => {
+    const state = { ...newGame(), spiritStones: 2000 };
+    const { state: after } = startWorkshopTask(state, "pill", { kind: "pill" });
+    assert.equal(after.spiritStones, 2000);
+    assert.deepEqual(jobsOf(after).pill.task, { kind: "pill", accumulatedPoints: 0 });
+    assert.equal(after.chronicle[0]?.text.includes("出炉随机"), true);
+    assert.throws(
+      () => startWorkshopTask(state, "gear", { kind: "gear", slot: "talisman", tier: 5 as 4 }),
+      /gear_invalid/,
+    );
+    assert.throws(
+      () => startWorkshopTask(state, "gear", { kind: "gear", slot: "talisman", tier: 3 }),
+      /gear_tier_locked/,
+    );
+    assert.throws(
+      () => startWorkshopTask(state, "pill", { kind: "gear", slot: "talisman", tier: 1 }),
+      /workshop_task_mismatch/,
+    );
+  });
+
+  it("宗门等级限档：1 级档 1–2 / 2 级档 1–3 / 3 级档 1–4", () => {
     assert.equal(maxForgeTierForRank(1), 2);
     assert.equal(maxForgeTierForRank(2), 3);
     assert.equal(maxForgeTierForRank(3), 4);
-    let state = newGame();
-    state = {
-      ...state,
-      spiritStones: 10000,
-      jobs: { ...jobsOf(state), gear: { workers: [], points: 600, tasks: [] } },
-    };
-    assert.throws(() => startGearCraft(state, "weapon", 3), /gear_tier_locked/);
-    const rank3 = { ...structuredClone(state), sectRank: 3 as const };
-    const { state: after } = startGearCraft(rank3, "weapon", 4);
-    assert.deepEqual(warehouseOf(after).gear.at(-1), { slot: "weapon", tier: 4 });
   });
 
-  it("开炉校验：灵石费用立即扣、点数池扣点、出炉入仓库、纪事 normal", () => {
+  it("同任务幂等（进度保留）；器坊换图纸进度作废并落纪事", () => {
     let state = newGame();
-    state = {
-      ...state,
-      spiritStones: 2000,
-      jobs: { ...jobsOf(state), gear: { workers: [], points: 300, tasks: [] } },
-    };
-    const { state: after, gear } = startGearCraft(state, "weapon", 1);
-    assert.deepEqual(gear, { slot: "weapon", tier: 1 });
-    assert.equal(after.spiritStones, 2000 - 200);
-    assert.equal(jobsOf(after).gear.points, 300 - 20);
-    assert.deepEqual(warehouseOf(after).gear, [{ slot: "weapon", tier: 1 }]);
-    const entry = after.chronicle[0];
+    state = setWorkshopStaff(state, "pill", 10).state;
+    state = startWorkshopTask(state, "pill", { kind: "pill" }).state;
+    state = advanceWorkshops(state).state;
+    const progress = taskProgress(state, "pill");
+    assert.ok(progress > 0);
+    // 丹房重复挂任务：恒为同任务，幂等，进度保留。
+    const { state: same } = startWorkshopTask(state, "pill", { kind: "pill" });
+    closeTo(taskProgress(same, "pill"), progress);
+    // 器坊换图纸：进度归零 + 纪事注明作废。
+    state = setWorkshopStaff(state, "gear", 5).state;
+    state = startWorkshopTask(state, "gear", { kind: "gear", slot: "talisman", tier: 1 }).state;
+    state = advanceWorkshops(state).state;
+    const gearProgress = taskProgress(state, "gear");
+    assert.ok(gearProgress > 0);
+    const { state: switched } = startWorkshopTask(state, "gear", {
+      kind: "gear",
+      slot: "talisman",
+      tier: 2,
+    });
+    assert.deepEqual(jobsOf(switched).gear.task, {
+      kind: "gear",
+      slot: "talisman",
+      tier: 2,
+      accumulatedPoints: 0,
+    });
+    const entry = switched.chronicle[0];
     assert.ok(entry);
-    assert.equal(entry.kind, "normal");
-    assert.ok(entry.text.includes("器坊出炉"));
-    // 状态只读：原状态未被修改
-    assert.equal(jobsOf(state).gear.points, 300);
-    assert.deepEqual(warehouseOf(state).gear, []);
+    assert.ok(entry.text.includes("档2"));
+    assert.ok(entry.text.includes("进度作废"));
+  });
+});
+
+describe("月结推进（月耗 / 加速 / 封顶 / 出炉连炉）", () => {
+  it("投入即自动开炉（无需主持/无需点选）；抽走人手停摆（不推进不扣费），回填人手续炼", () => {
+    let state = newGame();
+    state = setWorkshopStaff(state, "pill", 10).state;
+    assert.deepEqual(
+      jobsOf(state).pill.task,
+      { kind: "pill", accumulatedPoints: 0 },
+      "投入即自动开炉",
+    );
+    assert.equal(workshopPauseReason(state, "pill"), undefined, "有任务有人正常运转");
+    state = setWorkshopStaff(state, "pill", 0).state;
+    assert.equal(workshopPauseReason(state, "pill"), "no_staff");
+    const { state: paused } = advanceWorkshops(state);
+    assert.equal(taskProgress(paused, "pill"), 0, "无人不推进");
+    assert.equal(paused.spiritStones, state.spiritStones, "无人不扣月耗");
+    const { state: resumed } = advanceWorkshops(setWorkshopStaff(paused, "pill", 10).state);
+    closeTo(taskProgress(resumed, "pill"), 10); // 回填人手后恢复推进
   });
 
-  it("点数不足 / 灵石不足 / 非法槽档 拒绝开炉", () => {
+  it(`20 人炼丹（无主持）：每月 +20 点扣 20 灵石，15 月出炉连炉（统一点数 ${PILL_TASK_POINTS}）`, () => {
     let state = newGame();
-    state = {
-      ...state,
-      spiritStones: 2000,
-      jobs: { ...jobsOf(state), gear: { workers: [], points: 19, tasks: [] } },
-    };
-    assert.throws(() => startGearCraft(state, "weapon", 1), /craft_points_insufficient/);
-    const poor = {
-      ...structuredClone(state),
-      spiritStones: 100,
-      jobs: {
-        pill: { workers: [], points: 0, tasks: [] },
-        gear: { workers: [], points: 300, tasks: [] },
-      },
-    };
-    assert.throws(() => startGearCraft(poor, "weapon", 2), /insufficient_resource/);
-    assert.throws(
-      () => startGearCraft({ ...poor, spiritStones: 100000 }, "weapon", 5 as GearTier),
-      /gear_invalid/,
+    state = setWorkshopStaff(state, "pill", 20).state;
+    let result = advanceWorkshops(state);
+    closeTo(taskProgress(result.state, "pill"), 20);
+    assert.equal(result.state.spiritStones, 2000 - 20 * PILL_COST_PER_OUTER_MONTH);
+    assert.deepEqual(result.completedPills, []);
+    for (let i = 1; i < 14; i++) result = advanceWorkshops(result.state);
+    closeTo(taskProgress(result.state, "pill"), 280);
+    result = advanceWorkshops(result.state);
+    // 第 15 月满点出炉：丹方由确定性掷骰 `${seed}:pill-craft:${turn}` 决定（本测试直推未月结，turn 恒 1）。
+    const expectedPillId =
+      deterministicRoll("prod-seed-1:pill-craft:1") < 50 ? "pill-yanshou" : "pill-juling";
+    assert.deepEqual(result.completedPills, [{ pillId: expectedPillId, count: 1 }]);
+    assert.deepEqual(warehouseOf(result.state).pills, [{ pillId: expectedPillId, count: 1 }]);
+    assert.ok(result.state.chronicle.some((entry) => entry.text.includes("丹房出炉")));
+    // 连炉：进度清零续炼同任务（不选丹方）。
+    assert.deepEqual(jobsOf(result.state).pill.task, { kind: "pill", accumulatedPoints: 0 });
+  });
+
+  it("主持境界加成 +20%（练气前期）、丹道天赋再 +20%；主持离册自动失效退化为 1", () => {
+    let state = newGame();
+    state = assignWorkshopJob(state, "pill", "d-1").state;
+    state = setWorkshopStaff(state, "pill", 10).state;
+    const { state: after } = advanceWorkshops(state);
+    closeTo(taskProgress(after, "pill"), 12, 1e-9);
+    // 丹道天赋：12 → 14。
+    const alchemist = state.disciples.find((entry) => entry.id === "d-1");
+    assert.ok(alchemist);
+    alchemist.talentIds = ["t-pill-talent"];
+    const { state: talented } = advanceWorkshops(state);
+    closeTo(taskProgress(talented, "pill"), 14, 1e-9);
+    // 主持离册：退化为无加成 10，且自动离岗。
+    state.disciples = state.disciples.filter((entry) => entry.id !== "d-1");
+    const { state: masterGone } = advanceWorkshops(state);
+    closeTo(taskProgress(masterGone, "pill"), 10);
+    assert.deepEqual(jobsOf(masterGone).pill.workers, [], "离册主持自动离岗");
+  });
+
+  it("器坊月推进封顶 60%：100 人炼档 2（60 点）单月至多 36 点，2 月出炉", () => {
+    let state = newGame();
+    state = setWorkshopStaff(state, "gear", 100).state;
+    state = startWorkshopTask(state, "gear", { kind: "gear", slot: "talisman", tier: 2 }).state;
+    assert.equal(GEAR_MONTHLY_PROGRESS_CAP_RATIO, 0.6);
+    let result = advanceWorkshops(state);
+    closeTo(taskProgress(result.state, "gear"), 36);
+    assert.deepEqual(result.completedGear, []);
+    result = advanceWorkshops(result.state);
+    assert.deepEqual(result.completedGear, [{ slot: "talisman", tier: 2 }]);
+    assert.deepEqual(warehouseOf(result.state).gear, [{ slot: "talisman", tier: 2 }]);
+    assert.ok(result.state.chronicle.some((entry) => entry.text.includes("器坊出炉")));
+    assert.deepEqual(jobsOf(result.state).gear.task, {
+      kind: "gear",
+      slot: "talisman",
+      tier: 2,
+      accumulatedPoints: 0,
+    });
+  });
+
+  it("灵石不敷月耗：当月停摆（no_funds），不推进不扣费；回血后恢复", () => {
+    let state = newGame();
+    state = setWorkshopStaff(state, "pill", 20).state;
+    state = { ...state, spiritStones: 19 };
+    assert.equal(workshopPauseReason(state, "pill"), "no_funds");
+    const { state: after } = advanceWorkshops(state);
+    assert.equal(after.spiritStones, 19);
+    closeTo(taskProgress(after, "pill"), 0);
+    const { state: resumed } = advanceWorkshops({ ...after, spiritStones: 20 });
+    closeTo(taskProgress(resumed, "pill"), 20);
+  });
+
+  it("出炉预估与停摆推导、任务点数表（UI 展示口径）", () => {
+    let state = newGame();
+    assert.equal(estimateCraftMonths(state, "pill"), undefined, "空闲无预估");
+    state = setWorkshopStaff(state, "pill", 20).state;
+    assert.equal(estimateCraftMonths(state, "pill"), 15);
+    state = setWorkshopStaff(state, "pill", 0).state;
+    assert.equal(estimateCraftMonths(state, "pill"), undefined);
+    assert.equal(workshopPauseReason(state, "pill"), "no_staff");
+    assert.equal(PILL_TASK_POINTS, 300);
+    assert.equal(workshopTaskTotalPoints({ kind: "pill", accumulatedPoints: 0 }), PILL_TASK_POINTS);
+    assert.equal(
+      workshopTaskTotalPoints({ kind: "gear", slot: "talisman", tier: 1, accumulatedPoints: 0 }),
+      20,
     );
   });
 });
 
-describe("丹房开炉与出炉", () => {
-  it("开炉即扣灵石与点数，延寿丹 2 月后出炉入仓库", () => {
+describe("月结接线与旧档兼容", () => {
+  it("月结第 ④ 步推进生产：当月出炉、月耗并入当月灵石", () => {
     let state = newGame();
-    state = {
-      ...state,
-      spiritStones: 2000,
-      jobs: { ...jobsOf(state), pill: { workers: [], points: 100, tasks: [] } },
-    };
-    const { state: opened, task } = startPillCraft(state, "pill-yanshou");
-    assert.deepEqual(task, { pillId: "pill-yanshou", monthsLeft: 2 });
-    assert.equal(opened.spiritStones, 2000 - 500);
-    assert.equal(jobsOf(opened).pill.points, 100 - 40);
-    assert.ok(opened.chronicle[0]?.text.includes("丹房开炉"));
-
-    let advanced = advanceWorkshops(opened);
-    assert.deepEqual(advanced.completedPills, []);
-    assert.deepEqual(jobsOf(advanced.state).pill.tasks, [
-      { pillId: "pill-yanshou", monthsLeft: 1 },
-    ]);
-    advanced = advanceWorkshops(advanced.state);
-    assert.deepEqual(advanced.completedPills, [{ pillId: "pill-yanshou", count: 1 }]);
-    assert.deepEqual(jobsOf(advanced.state).pill.tasks, []);
-    assert.deepEqual(warehouseOf(advanced.state).pills, [{ pillId: "pill-yanshou", count: 1 }]);
-    const done = advanced.state.chronicle[0];
-    assert.ok(done);
-    assert.equal(done.kind, "normal");
-    assert.ok(done.text.includes("丹房出炉"));
-  });
-
-  it("多炉并行：聚灵丹 1 月先熟，两炉丹药分别入仓库", () => {
-    let state = newGame();
-    state = {
-      ...state,
-      spiritStones: 5000,
-      jobs: { ...jobsOf(state), pill: { workers: [], points: 200, tasks: [] } },
-    };
-    state = startPillCraft(state, "pill-yanshou").state;
-    state = startPillCraft(state, "pill-juling").state;
-    let advanced = advanceWorkshops(state);
-    assert.deepEqual(advanced.completedPills, [{ pillId: "pill-juling", count: 1 }]);
-    advanced = advanceWorkshops(advanced.state);
-    assert.deepEqual(advanced.completedPills, [{ pillId: "pill-yanshou", count: 1 }]);
-    assert.deepEqual(warehouseOf(advanced.state).pills, [
-      { pillId: "pill-juling", count: 1 },
-      { pillId: "pill-yanshou", count: 1 },
-    ]);
-  });
-
-  it("点数不足 / 灵石不足 / 未知丹药 拒绝开炉", () => {
-    let state = newGame();
-    state = {
-      ...state,
-      spiritStones: 2000,
-      jobs: { ...jobsOf(state), pill: { workers: [], points: 19, tasks: [] } },
-    };
-    assert.throws(() => startPillCraft(state, "pill-juling"), /craft_points_insufficient/);
-    assert.throws(
-      () => startPillCraft({ ...state, spiritStones: 100 }, "pill-juling"),
-      /insufficient_resource/,
+    state = assignWorkshopJob(state, "pill", "d-1").state;
+    const master = state.disciples.find((entry) => entry.id === "d-1");
+    assert.ok(master);
+    master.realmLevel = 10; // 元婴前期：境界加成 +200% → 100 人 × 3 = 300 点，当月满点出炉
+    state = setWorkshopStaff(state, "pill", 100).state;
+    const { state: after, result } = settleMonthly(state);
+    // 月结在生产步前先推进 currentTurn：出炉掷骰命名空间取结算月（turn = 2）。
+    const expectedPillId =
+      deterministicRoll("prod-seed-1:pill-craft:2") < 50 ? "pill-yanshou" : "pill-juling";
+    assert.deepEqual(warehouseOf(after).pills, [{ pillId: expectedPillId, count: 1 }]);
+    // 经济：月结 delta（供奉 − 俸禄 ± 历练）之外，生产月耗 100 灵石直接结算。
+    assert.equal(
+      after.spiritStones,
+      state.spiritStones + result.spiritStonesDelta - 100 * PILL_COST_PER_OUTER_MONTH,
     );
-    assert.throws(() => startPillCraft(state, "pill-none"), /pill_not_found/);
   });
-});
 
-describe("旧档兼容（扩展字段缺省）", () => {
-  it("旧档缺 library/jobs/warehouse：按空值口径工作", () => {
+  it("出炉丹方各 50%：同 seed 确定性、长跑分布接近对半", () => {
+    const runDistribution = (): Record<string, number> => {
+      let state: GameState = {
+        ...newGame("pill-dist"),
+        spiritStones: 1_000_000,
+      };
+      state = setWorkshopStaff(state, "pill", 30).state;
+      state = startWorkshopTask(state, "pill", { kind: "pill" }).state;
+      const counts: Record<string, number> = {};
+      for (let turn = 2; turn <= 1002; turn++) {
+        // 直推月度生产并按月翻新掷骰游标（月结真实顺序：先 +1 再推进生产）。
+        const { state: after, completedPills } = advanceWorkshops({
+          ...state,
+          currentTurn: turn,
+        });
+        state = after;
+        for (const entry of completedPills) {
+          counts[entry.pillId] = (counts[entry.pillId] ?? 0) + 1;
+        }
+      }
+      return counts;
+    };
+    const counts = runDistribution();
+    assert.deepEqual(counts, runDistribution(), "同 seed 双跑分布完全一致");
+    const total = (counts["pill-yanshou"] ?? 0) + (counts["pill-juling"] ?? 0);
+    assert.equal(total, 100, "30 人每 10 月出炉一炉：1001 月共 100 炉");
+    assert.ok((counts["pill-yanshou"] ?? 0) > 0, "延寿丹应出过炉");
+    assert.ok((counts["pill-juling"] ?? 0) > 0, "聚灵丹应出过炉");
+    const yanshouPct = ((counts["pill-yanshou"] ?? 0) / total) * 100;
+    assert.ok(
+      yanshouPct > 30 && yanshouPct < 70,
+      `延寿丹占比 ${yanshouPct.toFixed(1)}% 应接近 50%`,
+    );
+  });
+
+  it("旧档缺 jobs/warehouse：按空值口径工作，advanceWorkshops 物化扩展字段", () => {
     const legacy = stripM2Fields(newGame());
     assert.deepEqual(jobsOf(legacy), {
-      pill: { workers: [], points: 0, tasks: [] },
-      gear: { workers: [], points: 0, tasks: [] },
+      pill: { workers: [], assignedOuter: 0, task: null },
+      gear: { workers: [], assignedOuter: 0, task: null },
     });
     assert.deepEqual(warehouseOf(legacy), { gear: [], pills: [] });
-    // 空车间可推进（无人无炉 → 无变化），且首次推进物化扩展字段。
     const advanced = advanceWorkshops(legacy);
-    assert.deepEqual(jobsOf(advanced.state).pill.workers, []);
     assert.ok(advanced.state.jobs);
     assert.ok(advanced.state.warehouse);
-    // 旧档可直接任命 / 开炉校验走缺省点数池。
-    const assigned = assignWorkshopJob(advanced.state, "gear", "d-1").state;
-    assert.deepEqual(jobsOf(assigned).gear.workers, ["d-1"]);
-    assert.throws(() => startGearCraft(assigned, "weapon", 1), /craft_points_insufficient/);
   });
 
-  it("旧档 M1 月结不回归：JSON 往返后月结照常", () => {
-    const legacy = stripM2Fields(newGame());
-    const restored = JSON.parse(JSON.stringify(legacy)) as GameState;
-    const { state } = settleMonthly(restored, "rest");
-    assert.equal(state.currentTurn, 2);
-    assert.equal(state.jobs, undefined);
+  it("旧档 pill 任务带 pillId：读时剥离，进度保留", () => {
+    const legacy = newGame();
+    legacy.jobs = {
+      pill: {
+        workers: ["d-1"],
+        assignedOuter: 10,
+        task: { kind: "pill", pillId: "pill-juling", accumulatedPoints: 25 },
+      } as never,
+      gear: { workers: [], assignedOuter: 0, task: null },
+    };
+    assert.deepEqual(jobsOf(legacy).pill, {
+      workers: ["d-1"],
+      assignedOuter: 10,
+      task: { kind: "pill", accumulatedPoints: 25 },
+    });
+  });
+
+  it("旧档岗位点数池结构（points/tasks）读时归零迁移：主持保首位、其余丢弃", () => {
+    const legacy = newGame();
+    legacy.jobs = {
+      pill: {
+        workers: ["d-1", "d-2"],
+        points: 90,
+        tasks: [{ pillId: "pill-juling", monthsLeft: 1 }],
+      } as never,
+      gear: { workers: [], points: 30, tasks: [] } as never,
+    };
+    assert.deepEqual(jobsOf(legacy).pill, { workers: ["d-1"], assignedOuter: 0, task: null });
+    assert.deepEqual(jobsOf(legacy).gear, { workers: [], assignedOuter: 0, task: null });
+    const { state } = settleMonthly(legacy);
+    assert.ok(state.jobs);
   });
 
   it("新档初始即带空扩展字段", () => {
     const state = newGame();
     assert.deepEqual(state.jobs, {
-      pill: { workers: [], points: 0, tasks: [] },
-      gear: { workers: [], points: 0, tasks: [] },
+      pill: { workers: [], assignedOuter: 0, task: null },
+      gear: { workers: [], assignedOuter: 0, task: null },
     });
     assert.deepEqual(state.warehouse, { gear: [], pills: [] });
-    assert.deepEqual(state.library, { techniqueIds: [], spellIds: [] });
+  });
+
+  it("旧档 M1 月结不回归：JSON 往返后月结照常", () => {
+    const legacy = stripM2Fields(newGame());
+    const restored = JSON.parse(JSON.stringify(legacy)) as GameState;
+    const { state } = settleMonthly(restored);
+    assert.equal(state.currentTurn, 2);
+    assert.equal(state.jobs, undefined);
   });
 });
 
@@ -316,21 +441,21 @@ describe("生产确定性", () => {
     assert.notDeepEqual(a, c);
   });
 
-  it("生产全链路终态：装备与丹药入仓库、在炉清空、纪事齐备", () => {
+  it("生产全链路终态：丹药与装备入仓库、纪事齐备、连炉归零", () => {
     const state = productionScenario("prod-scenario-check");
+    // 器坊档 1 月推进封顶 12 点：第 2/4 月各出炉一炉（连炉两轮）。
     assert.deepEqual(warehouseOf(state).gear, [
-      { slot: "weapon", tier: 1 },
-      { slot: "accessory", tier: 2 },
+      { slot: "talisman", tier: 1 },
+      { slot: "talisman", tier: 1 },
     ]);
-    assert.deepEqual(warehouseOf(state).pills, [
-      { pillId: "pill-juling", count: 1 },
-      { pillId: "pill-yanshou", count: 1 },
-    ]);
-    assert.deepEqual(jobsOf(state).pill.tasks, []);
-    // 攒 9 月各 90 点：丹房 −60 后 +20 推进 = 50；器坊 −80 后 +20 推进 = 30。
-    assert.equal(jobsOf(state).pill.points, 50);
-    assert.equal(jobsOf(state).gear.points, 30);
-    assert.ok(state.chronicle.some((entry) => entry.text.includes("器坊出炉")));
+    // 丹房第 4 月出炉（主持练气前期 ×1.2：84/月 → 336 ≥ 300）：丹方由确定性掷骰决定（直推未月结，turn 恒 1）。
+    const expectedPillId =
+      deterministicRoll("prod-scenario-check:pill-craft:1") < 50 ? "pill-yanshou" : "pill-juling";
+    assert.deepEqual(warehouseOf(state).pills, [{ pillId: expectedPillId, count: 1 }]);
     assert.ok(state.chronicle.some((entry) => entry.text.includes("丹房出炉")));
+    assert.ok(state.chronicle.some((entry) => entry.text.includes("器坊出炉")));
+    // 双双出炉归零、当月超出点数不结转。
+    closeTo(taskProgress(state, "pill"), 0, 1e-9);
+    closeTo(taskProgress(state, "gear"), 0, 1e-9);
   });
 });

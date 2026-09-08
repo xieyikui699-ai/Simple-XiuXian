@@ -66,7 +66,6 @@ function makeDisciple(overrides: Partial<Disciple> = {}): Disciple {
     realmLevel: 1,
     zhenyuan: 0,
     breakthroughFailures: 0,
-    role: "inner",
     rootType: "five",
     rootElements: ["wood"],
     attributes: { ...BASE_ATTRIBUTES },
@@ -96,82 +95,81 @@ function spellPlan(spellId: string): BattlePlanEntry[] {
 }
 
 describe("属性派生唯一公式（combat-profile，玩家与 NPC 共用）", () => {
-  it("最大生命 = 100 + 体魄×5 + (实力等级−1)×50", () => {
+  it("最大生命 = 100 + 实力等级×体魄 + (实力等级−1)×50", () => {
     assert.equal(
       deriveCombatProfile({ realmLevel: 1, attributes: { ...BASE_ATTRIBUTES, physique: 50 } })
         .maxHp,
-      350,
+      150, // 100 + 50×1
     );
     assert.equal(
       deriveCombatProfile({ realmLevel: 7, attributes: { ...BASE_ATTRIBUTES, physique: 80 } })
         .maxHp,
-      800,
+      960, // 100 + 80×7 + 6×50
     );
     assert.equal(
       deriveCombatProfile({ realmLevel: 10, attributes: { ...BASE_ATTRIBUTES, physique: 100 } })
         .maxHp,
-      1050,
+      1550, // 100 + 100×10 + 9×50
     );
   });
 
-  it("物理攻击 = 力量×2 + 武器攻击（装备档 1=+10 / 档 4=+70）", () => {
+  it("物理攻击 = 30 + 等级×(力量/4) + (等级−1)×10", () => {
     assert.equal(
       deriveCombatProfile({ realmLevel: 1, attributes: BASE_ATTRIBUTES }).physicalAttack,
-      100,
-    );
-    assert.equal(
-      deriveCombatProfile({ realmLevel: 1, attributes: BASE_ATTRIBUTES, weaponAttack: 10 })
-        .physicalAttack,
-      110,
+      43, // 30 + 50/4 = 42.5 → 43
     );
     assert.equal(
       deriveCombatProfile({
         realmLevel: 1,
         attributes: { ...BASE_ATTRIBUTES, strength: 100 },
-        weaponAttack: 70,
       }).physicalAttack,
-      270,
+      55,
+    );
+    assert.equal(
+      deriveCombatProfile({ realmLevel: 10, attributes: BASE_ATTRIBUTES }).physicalAttack,
+      245, // 30 + 12.5×10 + 9×10
     );
   });
 
-  it("法术威力 = 魂力×2 + 法宝法威（装备档 1=+8 / 档 4=+32）", () => {
+  it("法术威力 = 30 + 等级×(魂力/4) + (等级−1)×10 + 法宝法威（档 1=+8 / 档 4=+32）", () => {
     assert.equal(
       deriveCombatProfile({ realmLevel: 1, attributes: BASE_ATTRIBUTES }).magicPower,
-      100,
+      43,
     );
     assert.equal(
       deriveCombatProfile({ realmLevel: 1, attributes: BASE_ATTRIBUTES, artifactMagic: 8 })
         .magicPower,
-      108,
+      51,
     );
     assert.equal(
-      deriveCombatProfile({ realmLevel: 1, attributes: BASE_ATTRIBUTES, artifactMagic: 32 })
+      deriveCombatProfile({ realmLevel: 10, attributes: BASE_ATTRIBUTES, artifactMagic: 32 })
         .magicPower,
-      132,
+      277,
     );
   });
 
-  it("防御 = ⌊体魄×1.5 + 护甲防御⌋（向下取整，装备档 2=+25 / 档 4=+70）", () => {
+  it("防御 = ⌊5 + 等级×(体魄/4) + (等级−1)×4⌋ + 功法防御平加（向下取整）", () => {
     assert.equal(
       deriveCombatProfile({ realmLevel: 1, attributes: { ...BASE_ATTRIBUTES, physique: 47 } })
         .defense,
-      70,
+      16, // 5 + 47/4 = 16.75 → ⌊⌋
     );
     assert.equal(
       deriveCombatProfile({
         realmLevel: 1,
         attributes: { ...BASE_ATTRIBUTES, physique: 47 },
-        armorDefense: 25,
+        defenseFlat: 5,
       }).defense,
-      95,
+      21,
     );
     assert.equal(
-      deriveCombatProfile({
-        realmLevel: 1,
-        attributes: { ...BASE_ATTRIBUTES, physique: 100 },
-        armorDefense: 70,
-      }).defense,
-      220,
+      deriveCombatProfile({ realmLevel: 10, attributes: BASE_ATTRIBUTES }).defense,
+      166, // 5 + 12.5×10 + 9×4
+    );
+    assert.equal(
+      deriveCombatProfile({ realmLevel: 1, attributes: { ...BASE_ATTRIBUTES, physique: 100 } })
+        .defense,
+      30,
     );
   });
 
@@ -200,11 +198,16 @@ describe("属性派生唯一公式（combat-profile，玩家与 NPC 共用）", 
     );
   });
 
-  it("暴击率 = 5 + 天赋暴击，上限 50（锋芒毕露 +8）", () => {
-    assert.equal(deriveCombatProfile({ realmLevel: 1, attributes: BASE_ATTRIBUTES }).critRate, 5);
+  it("暴击率 = 10 + 悟性/4 + 天赋暴击，上限 50（锋芒毕露 +8）", () => {
+    assert.equal(deriveCombatProfile({ realmLevel: 1, attributes: BASE_ATTRIBUTES }).critRate, 23);
+    assert.equal(
+      deriveCombatProfile({ realmLevel: 1, attributes: { ...BASE_ATTRIBUTES, comprehension: 90 } })
+        .critRate,
+      33, // 10 + round(90/4)
+    );
     assert.equal(
       deriveCombatProfile({ realmLevel: 1, attributes: BASE_ATTRIBUTES, critFlat: 8 }).critRate,
-      13,
+      31,
     );
     assert.equal(
       deriveCombatProfile({ realmLevel: 1, attributes: BASE_ATTRIBUTES, critFlat: 100 }).critRate,
@@ -212,22 +215,21 @@ describe("属性派生唯一公式（combat-profile，玩家与 NPC 共用）", 
     );
   });
 
-  it("弟子适配层：装备/功法/天赋聚合成有效五维后进入公式，并返回分来源明细", () => {
+  it("弟子适配层：法宝/功法/天赋聚合成有效五维后进入公式，并返回分来源明细", () => {
     const profile = buildCombatProfile(
       makeDisciple({
-        equippedGear: { weapon: 1, talisman: 1, armor: 1, accessory: 1 },
+        equippedGear: { talisman: 1 },
         techniqueId: "tech-houtu",
         talentIds: ["t-thunder-momentum"],
       }),
     );
-    // 有效五维：力量/魂力/身法 = 50 + 饰品 2 = 52；体魄 = 50 + 厚土诀 5 + 饰品 2 = 57。
-    assert.equal(profile.maxHp, 100 + 57 * 5);
-    assert.equal(profile.defense, Math.floor(57 * 1.5 + 10) + 5);
-    assert.equal(profile.physicalAttack, 52 * 2 + 10);
-    assert.equal(profile.magicPower, 52 * 2 + 8);
-    assert.equal(profile.firstStrike, 52 + 3);
-    assert.equal(profile.breakdown.attributes.effective.physique, 57);
-    assert.equal(profile.breakdown.attributes.gearFlat.physique, 2);
+    // 有效五维：五维 = 基础 50 + 厚土诀体魄 5 → 体魄 55，其余 50。
+    assert.equal(profile.maxHp, 100 + 55);
+    assert.equal(profile.defense, Math.floor(5 + (55 / 4) * 1) + 5);
+    assert.equal(profile.physicalAttack, 43);
+    assert.equal(profile.magicPower, 43 + 8);
+    assert.equal(profile.firstStrike, 50 + 3);
+    assert.equal(profile.breakdown.attributes.effective.physique, 55);
     assert.equal(profile.breakdown.attributes.artFlat.physique, 5);
     assert.equal(profile.breakdown.artDefenseFlat, 5);
     assert.equal(profile.breakdown.talentFirstStrikeFlat, 3);
@@ -238,9 +240,9 @@ describe("属性派生唯一公式（combat-profile，玩家与 NPC 共用）", 
 });
 
 describe("回合规则（battle）", () => {
-  it("常量锚点：命中 90 / 暴伤 1.5× / 普攻 1.0× / 30 回合上限 / 伤势 40/20 与 1/3 月", () => {
+  it("常量锚点：命中 90 / 暴伤 2× / 普攻 1.0× / 30 回合上限 / 伤势 40/20 与 1/3 月", () => {
     assert.equal(HIT_RATE, 90);
-    assert.equal(CRIT_MULTIPLIER, 1.5);
+    assert.equal(CRIT_MULTIPLIER, 2);
     assert.equal(BASIC_ATTACK_MULTIPLIER, 1.0);
     assert.equal(MAX_BATTLE_ROUNDS, 30);
     assert.equal(DEFEAT_LIGHT_INJURY_PCT, 40);
@@ -249,14 +251,14 @@ describe("回合规则（battle）", () => {
     assert.equal(HEAVY_INJURY_MONTHS, 3);
   });
 
-  it("伤害 = max(1, round(攻击×倍率 − 防御×0.8))；暴击再 ×1.5", () => {
+  it("伤害 = max(1, round(攻击×倍率 − 防御×0.8))；暴击再 ×2", () => {
     assert.equal(computeDamage({ attack: 110, multiplier: 1.0, defense: 0 }), 110);
     assert.equal(computeDamage({ attack: 110, multiplier: 1.0, defense: 50 }), 70);
     assert.equal(computeDamage({ attack: 110, multiplier: 2.2, defense: 50 }), 202);
     assert.equal(computeDamage({ attack: 100, multiplier: 0.8, defense: 50 }), 40);
     assert.equal(computeDamage({ attack: 2, multiplier: 1.0, defense: 220 }), 1);
-    assert.equal(computeDamage({ attack: 110, multiplier: 1.0, defense: 0, crit: true }), 165);
-    assert.equal(computeDamage({ attack: 100, multiplier: 1.2, defense: 50, crit: true }), 120);
+    assert.equal(computeDamage({ attack: 110, multiplier: 1.0, defense: 0, crit: true }), 220);
+    assert.equal(computeDamage({ attack: 100, multiplier: 1.2, defense: 50, crit: true }), 160);
     assert.equal(computeDamage({ attack: 2, multiplier: 1.0, defense: 220, crit: true }), 2);
   });
 
@@ -285,7 +287,7 @@ describe("回合规则（battle）", () => {
   });
 
   it("30 回合未分胜负判平：双方无伤势，双方伤害至多个位数", () => {
-    // 双方攻击 2、防御 150、生命 1050：单击伤害恒为 min 值 1（暴击 round(1×1.5)=2），
+    // 双方攻击 123、防御 291、生命 1550：单击减伤后恒为 min 值 1（暴击 round(1×2)=2），
     // 30 回合累计 ≤60，必然打不死 → 平局与掷骰结果无关。
     const stumpy = () =>
       profileFighter(
@@ -308,8 +310,8 @@ describe("回合规则（battle）", () => {
   });
 
   it("法术冷却：CD 内自动回落普通攻伐（金锋斩 CD 3 → 法/普/普/法）", () => {
-    // 施法者：魂力 90 + 法宝档 4（+32）→ 法威 212；等级 10 体魄 90 → 生命 1000、防御 135。
-    // 金锋斩 2.2× 且与金灵根同系 ×1.15 → 对防 135 目标单发 round(212×2.53−108)=428；普攻 1。
+    // 施法者：魂力 90 + 法宝档 4（+32）→ 法威 30+225+90+32=377；等级 10 体魄 90 → 生命 1450、防御 266。
+    // 金锋斩 2.2× 且与金灵根同系 ×1.15 → 对防 266 目标单发 round(377×2.53−212.8)=741；普攻 32。
     const spell = {
       id: "s-jinfeng",
       name: "金锋斩",
@@ -344,11 +346,11 @@ describe("回合规则（battle）", () => {
     assert.equal(casterActions[3]?.spellId, "s-jinfeng");
     const firstSpell = casterActions[0];
     assert.ok(firstSpell);
-    if (firstSpell.hit) assert.equal(firstSpell.damage, 428);
+    if (firstSpell.hit) assert.equal(firstSpell.damage, 741);
     assert.equal(report.winner, "A");
   });
 
-  it("命中率 90%、暴击率 5% 的统计口径（200 场固定 seed 派生，全程确定）", () => {
+  it("命中率 90%、暴击率 23%（悟性 50）的统计口径（200 场固定 seed 派生，全程确定）", () => {
     const brawler = () =>
       profileFighter("斗士", deriveCombatProfile({ realmLevel: 1, attributes: BASE_ATTRIBUTES }));
     let attacks = 0;
@@ -368,12 +370,14 @@ describe("回合规则（battle）", () => {
     const hitRate = hits / attacks;
     assert.ok(hitRate > 0.85 && hitRate < 0.95, `命中率 ${hitRate}`);
     const critRate = crits / hits;
-    assert.ok(critRate > 0.03 && critRate < 0.08, `暴击率 ${critRate}`);
+    assert.ok(critRate > 0.18 && critRate < 0.28, `暴击率 ${critRate}`);
   });
 
   it("伤势：胜利方无伤，战败方按 40% 轻伤 / 20% 重伤 / 其余无伤掷骰", () => {
+    // 10 级强者对 1 级弱者形成完全压制（单击 241 一击必杀、对方反击恒 min 1），
+    // 胜负与伤势掷骰解耦，200 seed 只统计伤势分布。
     const bully = () =>
-      profileFighter("强者", deriveCombatProfile({ realmLevel: 1, attributes: BASE_ATTRIBUTES }));
+      profileFighter("强者", deriveCombatProfile({ realmLevel: 10, attributes: BASE_ATTRIBUTES }));
     const weakling = () =>
       profileFighter(
         "弱者",
@@ -423,7 +427,7 @@ describe("状态效果接入（battle-status × battle）", () => {
     );
     assert.ok(burnTicks.length > 0, "灼烧应至少结算一次");
     for (const tick of burnTicks) {
-      assert.equal(tick.damage, 21); // 350 × 6%
+      assert.equal(tick.damage, 9); // 150 × 6%
       assert.equal(tick.hpLoss, 0); // 灼烧直接扣血，不走护盾口径
     }
   });
@@ -431,14 +435,21 @@ describe("状态效果接入（battle-status × battle）", () => {
   it("灼烧可致死：灼烧结算打空生命，战败方按掷骰结算伤势", () => {
     const yehuo = getSpellById("spell-yehuo");
     assert.ok(yehuo);
-    // 甲法威 100：单发 round(100 − 0.8) = 99；乙生命 105 → 余 6，灼烧每回合 8 → 第 2 回合末致死。
+    // 双方 10 级互压成刮痧（甲普攻对防 291 恒 min 1、业火单发 112；乙普攻 min 1），
+    // 主要伤害来自业火灼烧（每 tick 8% × 1550 = 124），30 回合内必有多枚 tick 并磨死乙。
     const caster = fighterOf(
       "甲",
-      { attributes: { ...BASE_ATTRIBUTES, strength: 1, physique: 90 } },
+      {
+        realmLevel: 10,
+        attributes: { ...BASE_ATTRIBUTES, strength: 1, physique: 90, soulPower: 90 },
+      },
       [yehuo],
       spellPlan(yehuo.id),
     );
-    const fragile = fighterOf("乙", { attributes: { ...WEAK_ATTRIBUTES, physique: 1 } });
+    const fragile = fighterOf("乙", {
+      realmLevel: 10,
+      attributes: { ...WEAK_ATTRIBUTES, physique: 100 },
+    });
     const report = runBattle(caster, fragile, "status-burn-kill-1");
     assert.equal(report.winner, "A");
     assert.ok(
@@ -544,15 +555,20 @@ describe("状态效果接入（battle-status × battle）", () => {
   it("状态抗性：百毒不侵 20% 按概率抵消附加（40 场固定 seed）", () => {
     const yanbao = getSpellById("spell-yanbao");
     assert.ok(yanbao);
-    // 双方互为刮痧，保证 30 回合内多次施法附加尝试。
+    // 双方互为刮痧：10 级攻击 123 对防御 291 → 普攻恒 min 1，主要伤害来自炎爆术与灼烧，
+    // 30 回合内难以速胜，保证多次施法附加尝试。
     const caster = fighterOf(
       "甲",
-      { attributes: { ...WEAK_ATTRIBUTES, soulPower: 10, physique: 100 } },
+      {
+        realmLevel: 10,
+        attributes: { ...WEAK_ATTRIBUTES, strength: 1, soulPower: 10, physique: 100 },
+      },
       [yanbao],
       spellPlan(yanbao.id),
     );
     const resistant = fighterOf("乙", {
-      attributes: { ...WEAK_ATTRIBUTES, physique: 100 },
+      realmLevel: 10,
+      attributes: { ...WEAK_ATTRIBUTES, strength: 1, physique: 100 },
       talentIds: ["t-poison-immune"],
     });
     let applied = 0;

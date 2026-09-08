@@ -8,7 +8,7 @@
     "dev:weapp": "taro build --type weapp --watch",
     "build:weapp": "taro build --type weapp",
     "build": "pnpm run build:weapp",
-    "test": "esbuild src/store/game-store.test.ts --bundle --format=esm --platform=node --external:@simple-xiuxian/engine --outfile=dist-test/game-store.test.mjs && node --test dist-test/game-store.test.mjs",
+    "test": "esbuild src/store/game-store.test.ts --bundle --format=esm --platform=node --external:@simple-xiuxian/engine --outfile=dist-test/game-store.test.mjs && esbuild src/store/auto-save.test.ts --bundle --format=esm --platform=node --external:@simple-xiuxian/engine --outfile=dist-test/auto-save.test.mjs && node --test dist-test/game-store.test.mjs dist-test/auto-save.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev:h5": "taro build --type h5 --watch",
     "build:h5": "taro build --type h5"
@@ -35,6 +35,7 @@
   "devDependencies": {
     "@babel/core": "^7.24.4",
     "@babel/preset-react": "^7.24.1",
+    "@pmmmwh/react-refresh-webpack-plugin": "^0.6.3",
     "@tarojs/cli": "4.2.1",
     "@tarojs/webpack5-runner": "4.2.1",
     "@types/node": "22.15.3",

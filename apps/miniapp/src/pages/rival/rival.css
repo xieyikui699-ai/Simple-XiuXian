@@ -1,8 +1,9 @@
+/* 对手宗门：情报/名册/会战记录。 */
 .rival-facts {
   display: flex;
   flex-direction: column;
-  gap: 6rpx;
-  margin-bottom: 10rpx;
+  gap: 8rpx;
+  margin-bottom: 12rpx;
 }
 
 .rival-row {
@@ -11,8 +12,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 12rpx;
-  padding: 10rpx 0;
-  border-bottom: 2rpx solid #f0e8d8;
+  padding: 12rpx 0;
+  border-bottom: 2rpx solid var(--line);
 }
 
 .rival-row:last-child {
@@ -20,22 +21,23 @@
 }
 
 .rival-injured {
-  color: #b03030;
+  color: var(--red);
   font-size: 24rpx;
 }
 
 .war-banner {
-  color: #b03030;
+  display: block;
+  color: var(--red);
   font-weight: 600;
-  margin: 8rpx 0;
+  margin: 12rpx 0;
 }
 
 .war-record {
   display: flex;
   flex-direction: column;
-  gap: 4rpx;
-  padding: 12rpx 0;
-  border-bottom: 2rpx solid #f0e8d8;
+  gap: 6rpx;
+  padding: 14rpx 0;
+  border-bottom: 2rpx solid var(--line);
 }
 
 .war-record:last-child {
@@ -43,11 +45,11 @@
 }
 
 .war-win {
-  color: #7a5a12;
+  color: var(--gold);
   font-weight: 600;
 }
 
 .war-lose {
-  color: #b03030;
+  color: var(--red);
   font-weight: 600;
 }

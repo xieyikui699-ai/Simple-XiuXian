@@ -1,0 +1,35 @@
+{
+  "generatedAt": "2026-09-07T14:22:05.475Z",
+  "gamesPerTier": 200,
+  "maxMonths": 7200,
+  "tiers": {
+    "standard": {
+      "games": 200,
+      "ascension": 200,
+      "annexation": 0,
+      "annexed": 0,
+      "bankrupt": 0,
+      "timeout": 0,
+      "ascensionYears": {
+        "p25": 22.666666666666668,
+        "median": 32.083333333333336,
+        "p75": 40.333333333333336,
+        "mean": 32.49625
+      },
+      "annexationPct": 0,
+      "annexedPct": 0,
+      "bankruptPct": 0,
+      "diffOkMedianShare": 0.8314087759815243,
+      "rankDiffOkMedianShare": 1,
+      "meanWars": 7.94,
+      "meanDeaths": 0,
+      "anchors": {
+        "medianAscensionWithin30to60": true,
+        "annexationAtMost25Pct": true,
+        "annexedAtMost25Pct": true,
+        "levelDiffMostlyWithin1": true
+      },
+      "elapsedMs": 460617
+    }
+  }
+}

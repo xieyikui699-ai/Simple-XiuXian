@@ -1,22 +1,34 @@
 import {
   CRAFT_JOB_KINDS,
-  GEAR_CRAFT_COST,
-  GEAR_CRAFT_POINTS,
+  GEAR_COST_PER_OUTER_MONTH,
   GEAR_SLOT_DISPLAY_NAMES,
   GEAR_SLOT_KEYS,
   GEAR_TIERS,
-  PILLS,
-  WORKSHOP_JOB_LIMIT,
-  WORKSHOP_POINTS_PER_JOB,
+  PILL_COST_PER_OUTER_MONTH,
+  WORKSHOP_MASTER_LIMIT,
+  effectiveOuterJobsOf,
+  estimateCraftMonths,
+  jobsOf,
   maxForgeTierForRank,
-  workerMonthlyPoints,
+  sectLimitsFor,
+  workshopPauseReason,
+  workshopSpeedMultiplier,
+  workshopTaskTotalPoints,
 } from "@simple-xiuxian/engine";
-import type { CraftJobKind, Disciple, GameState, GearSlot, GearTier } from "@simple-xiuxian/engine";
-import { Button, Text, View } from "@tarojs/components";
-import { navigateBack, reLaunch, useDidShow } from "@tarojs/taro";
+import type {
+  CraftJobKind,
+  Disciple,
+  GameState,
+  GearSlot,
+  GearTier,
+  WorkshopTask,
+} from "@simple-xiuxian/engine";
+import { Button, Slider, Text, View } from "@tarojs/components";
+import { reLaunch, useDidShow } from "@tarojs/taro";
 import { useState } from "react";
 import { getGameStore, useGame } from "../../store/use-game";
 import { formatNumber, formatTurn } from "../../ui/display";
+import { BackBar } from "../../ui/nav";
 import { DisciplePicker } from "../../ui/picker";
 import "./alchemy.css";
 
@@ -30,19 +42,22 @@ const WORKSHOP_ROLE_NAMES: Record<CraftJobKind, string> = {
   gear: "工匠",
 };
 
-function usableDisciples(state: GameState): Disciple[] {
-  return state.disciples.filter((disciple) => disciple.role === "inner" && disciple.age >= 16);
+function masterCandidates(state: GameState): Disciple[] {
+  const busy = new Set(CRAFT_JOB_KINDS.flatMap((entry) => jobsOf(state)[entry].workers));
+  return state.disciples.filter((disciple) => disciple.age >= 16 && !busy.has(disciple.id));
 }
 
-function pillRowClass(affordable: boolean): string {
-  return `craft-row${affordable ? "" : " craft-row-disabled"}`;
+function taskProgressPct(task: WorkshopTask): number {
+  const total = workshopTaskTotalPoints(task);
+  if (total <= 0) return 0;
+  return Math.min(100, Math.round((task.accumulatedPoints / total) * 100));
 }
 
 export default function AlchemyPage() {
   const store = getGameStore();
   const { state, errorMessage } = useGame();
   const [assigning, setAssigning] = useState<CraftJobKind | null>(null);
-  const [forgeSlot, setForgeSlot] = useState<GearSlot>("weapon");
+  const [forgeSlot, setForgeSlot] = useState<GearSlot>("talisman");
   const [forgeTier, setForgeTier] = useState<GearTier>(1);
 
   useDidShow(() => {
@@ -51,103 +66,122 @@ export default function AlchemyPage() {
 
   if (!state) return null;
   const ended = state.ending !== undefined;
+  const allJobs = jobsOf(state);
 
   const renderWorkshop = (kind: CraftJobKind) => {
-    const workshop = state.jobs?.[kind];
-    const workers = (workshop?.workers ?? [])
-      .map((workerId) => state.disciples.find((disciple) => disciple.id === workerId))
-      .filter((disciple): disciple is Disciple => disciple !== undefined);
-    const candidates = usableDisciples(state).filter(
-      (disciple) => !workers.some((worker) => worker.id === disciple.id),
+    const workshop = allJobs[kind];
+    const masterId = workshop.workers[0];
+    const master = masterId
+      ? state.disciples.find((disciple) => disciple.id === masterId)
+      : undefined;
+    const speed = workshopSpeedMultiplier(state, kind);
+    const otherAssigned = kind === "pill" ? allJobs.gear.assignedOuter : allJobs.pill.assignedOuter;
+    // 挖矿/练气在编同样占用外门人数（外门分工合计 ≤ 外门总数，恒按宗门等级上限满员）。
+    const outerJobs = effectiveOuterJobsOf(state);
+    const staffCap = Math.max(
+      0,
+      sectLimitsFor(state.sectRank).outerLimit - otherAssigned - outerJobs.mining - outerJobs.qi,
     );
-    const busy = (workshop?.tasks.length ?? 0) > 0;
+    const pause = workshopPauseReason(state, kind);
+    const months = estimateCraftMonths(state, kind);
+    const task = workshop.task;
+    const staff = workshop.assignedOuter;
+    const monthlyCost =
+      staff * (kind === "pill" ? PILL_COST_PER_OUTER_MONTH : GEAR_COST_PER_OUTER_MONTH);
+    const selectedSlot = task?.kind === "gear" ? task.slot : forgeSlot;
+    const selectedTier = task?.kind === "gear" ? task.tier : forgeTier;
+
     return (
       <View key={kind} className="card">
-        <View className="card-title">
-          {WORKSHOP_TITLES[kind]}（岗位 {workers.length}/{WORKSHOP_JOB_LIMIT}）
-        </View>
-        <Text className="muted">
-          点数池 {formatNumber(workshop?.points ?? 0)} · 每岗每月 +{WORKSHOP_POINTS_PER_JOB} 点
-          （丹道/器道天赋再 +20%）
-        </Text>
-        {workers.length === 0 && (
-          <Text className="muted">尚无{WORKSHOP_ROLE_NAMES[kind]}，无岗位则点数不增长。</Text>
-        )}
-        {workers.map((worker) => (
-          <View key={worker.id} className="workshop-row">
-            <Text>
-              {WORKSHOP_ROLE_NAMES[kind]} {worker.name} · 每月 +
-              {workerMonthlyPoints(kind, worker.talentIds)} 点
-            </Text>
+        <View className="card-title-row">
+          <View className="card-title">
+            {WORKSHOP_TITLES[kind]}（主持 {workshop.workers.length}/{WORKSHOP_MASTER_LIMIT}）
+          </View>
+          {assigning !== kind && master && (
             <Button
               className="btn-mini"
               disabled={ended}
-              onClick={() => store.removeJob(kind, worker.id)}
+              onClick={() => store.removeJob(kind, master.id)}
             >
               卸任
             </Button>
-          </View>
-        ))}
-        {kind === "pill" && (
+          )}
+          {assigning !== kind && !master && workshop.workers.length < WORKSHOP_MASTER_LIMIT && (
+            <Button className="btn-mini" disabled={ended} onClick={() => setAssigning(kind)}>
+              任命{WORKSHOP_ROLE_NAMES[kind]}
+            </Button>
+          )}
+        </View>
+        {master && (
+          <Text className="muted">
+            {WORKSHOP_ROLE_NAMES[kind]} {master.name} · 加成 +{Math.round((speed - 1) * 100)}%
+          </Text>
+        )}
+        {assigning === kind && (
+          <DisciplePicker
+            title={`任命${WORKSHOP_ROLE_NAMES[kind]}（无职成年弟子，任内不战斗不修炼）`}
+            hint="已被他房或长老占用的弟子不可再任。"
+            disciples={masterCandidates(state)}
+            onPick={(discipleId) => {
+              store.assignJob(kind, discipleId);
+              setAssigning(null);
+            }}
+          />
+        )}
+
+        {task && (
           <View className="furnace-box">
-            <Text className="picker-title">在炉丹药</Text>
-            {(workshop?.tasks.length ?? 0) === 0 && (
-              <Text className="muted">炉火未起。开炉后按月自动出炉入仓库。</Text>
-            )}
-            {(workshop?.tasks ?? []).map((task, index) => {
-              const pill = PILLS.find((entry) => entry.id === task.pillId);
-              return (
-                <Text key={`${task.pillId}-${index}`} className="furnace-task">
-                  {pill?.name ?? task.pillId} · 出炉剩余 {task.monthsLeft} 月
-                </Text>
-              );
-            })}
+            <View className="craft-progress-track">
+              <View
+                className="craft-progress-fill"
+                style={{ width: `${taskProgressPct(task)}%` }}
+              />
+            </View>
+            <Text className="muted">
+              进度 {Math.floor(task.accumulatedPoints)}/{workshopTaskTotalPoints(task)} 点
+              {pause === "no_funds" && " · 停摆：灵石不敷月耗"}
+              {!pause && months !== undefined && ` · 预计 ${months} 月后出炉（连炉续炼）`}
+            </Text>
           </View>
         )}
 
+        <View className="staff-box">
+          <View className="staff-row">
+            <Text className="picker-title">投入外门弟子</Text>
+            <Text className="muted">{monthlyCost}灵石/月</Text>
+            <Text className="staff-count">已投入 {staff} 人</Text>
+          </View>
+          <Slider
+            className="staff-slider"
+            min={0}
+            max={staffCap}
+            step={1}
+            value={Math.min(workshop.assignedOuter, staffCap)}
+            disabled={ended}
+            activeColor="#8c5a2b"
+            blockColor="#8c5a2b"
+            onChange={(event) => store.setStaff(kind, event.detail.value)}
+          />
+        </View>
+
         {kind === "pill" && (
           <View className="craft-panel">
-            {PILLS.map((pill) => {
-              const affordable =
-                !ended &&
-                !busy &&
-                state.spiritStones >= pill.craftCost &&
-                (workshop?.points ?? 0) >= pill.craftPoints;
-              return (
-                <View key={pill.id} className={pillRowClass(affordable)}>
-                  <Text>
-                    {pill.name}（{pill.craftPoints} 点 / {formatNumber(pill.craftCost)} 灵石 /{" "}
-                    {pill.craftMonths} 月）
-                  </Text>
-                  <Text className="muted">
-                    {pill.effect.lifespanFlat !== undefined
-                      ? `服用者最大寿命 +${pill.effect.lifespanFlat} 年`
-                      : `服用者 ${pill.effect.zhenyuanBuff?.months} 月内真元 ×${pill.effect.zhenyuanBuff?.multiplier}（不叠加刷新）`}
-                  </Text>
-                  <Button
-                    className="btn-mini"
-                    disabled={!affordable}
-                    onClick={() => store.craftPill(pill.id)}
-                  >
-                    开炉
-                  </Button>
-                </View>
-              );
-            })}
+            <Text className="muted">延寿丹（寿命 +10 年）</Text>
+            <Text className="muted">聚灵丹（12 月真元 ×1.5）</Text>
           </View>
         )}
 
         {kind === "gear" && (
           <View className="craft-panel">
-            <Text className="picker-title">
-              炼制装备（本宗可炼至档{maxForgeTierForRank(state.sectRank)}）
-            </Text>
             <View className="forge-options">
               {GEAR_SLOT_KEYS.map((slot) => (
                 <Text
                   key={slot}
-                  className={`forge-chip${forgeSlot === slot ? " forge-chip-active" : ""}`}
-                  onClick={() => setForgeSlot(slot)}
+                  className={`forge-chip${selectedSlot === slot ? " forge-chip-active" : ""}`}
+                  onClick={() => {
+                    setForgeSlot(slot);
+                    if (!ended) store.setGearTask(slot, selectedTier);
+                  }}
                 >
                   {GEAR_SLOT_DISPLAY_NAMES[slot]}
                 </Text>
@@ -158,8 +192,11 @@ export default function AlchemyPage() {
                 (tier) => (
                   <Text
                     key={tier}
-                    className={`forge-chip${forgeTier === tier ? " forge-chip-active" : ""}`}
-                    onClick={() => setForgeTier(tier)}
+                    className={`forge-chip${selectedTier === tier ? " forge-chip-active" : ""}`}
+                    onClick={() => {
+                      setForgeTier(tier);
+                      if (!ended) store.setGearTask(selectedSlot, tier);
+                    }}
                   >
                     档{tier}
                   </Text>
@@ -167,42 +204,10 @@ export default function AlchemyPage() {
               )}
             </View>
             <Text className="muted">
-              需 {GEAR_CRAFT_POINTS[forgeTier]} 点 / {formatNumber(GEAR_CRAFT_COST[forgeTier])}{" "}
-              灵石，开炉即出炉入仓库。
+              本宗可炼至档{maxForgeTierForRank(state.sectRank)}
+              ；投入外门弟子即自动开工，点选图纸换目标（进度作废）。
             </Text>
-            <Button
-              className="btn-mini"
-              disabled={
-                ended ||
-                state.spiritStones < GEAR_CRAFT_COST[forgeTier] ||
-                (workshop?.points ?? 0) < GEAR_CRAFT_POINTS[forgeTier]
-              }
-              onClick={() => store.craftGear(forgeSlot, forgeTier)}
-            >
-              炼制{GEAR_SLOT_DISPLAY_NAMES[forgeSlot]}（档{forgeTier}）
-            </Button>
           </View>
-        )}
-
-        {assigning === kind && (
-          <DisciplePicker
-            title={`任命${WORKSHOP_ROLE_NAMES[kind]}（成年内门，任内不战斗不修炼）`}
-            hint="已被他岗或长老占用的弟子不可再任。"
-            disciples={candidates}
-            onPick={(discipleId) => {
-              store.assignJob(kind, discipleId);
-              setAssigning(null);
-            }}
-          />
-        )}
-        {assigning !== kind && (
-          <Button
-            className="btn-mini"
-            disabled={ended || workers.length >= WORKSHOP_JOB_LIMIT}
-            onClick={() => setAssigning(kind)}
-          >
-            任命{WORKSHOP_ROLE_NAMES[kind]}
-          </Button>
         )}
       </View>
     );
@@ -210,21 +215,21 @@ export default function AlchemyPage() {
 
   return (
     <View className="page">
-      <View className="card">
-        <View className="card-title">丹房 · 器坊</View>
-        <Text className="muted">
-          当前灵石：{formatNumber(state.spiritStones)} · {formatTurn(state.currentTurn)}
-        </Text>
-        {errorMessage !== null && (
-          <Text className="error-line" onClick={() => store.clearError()}>
-            {errorMessage}（点击关闭）
+      <BackBar title="丹房 · 器坊" />
+      <View className="page-body">
+        <View className="card">
+          <View className="card-title">丹房 · 器坊</View>
+          <Text className="muted">
+            当前灵石：{formatNumber(state.spiritStones)} · {formatTurn(state.currentTurn)}
           </Text>
-        )}
+          {errorMessage !== null && (
+            <Text className="error-line" onClick={() => store.clearError()}>
+              {errorMessage}（点击关闭）
+            </Text>
+          )}
+        </View>
+        {CRAFT_JOB_KINDS.map(renderWorkshop)}
       </View>
-      {CRAFT_JOB_KINDS.map(renderWorkshop)}
-      <Button className="btn-primary" onClick={() => navigateBack()}>
-        返回
-      </Button>
     </View>
   );
 }

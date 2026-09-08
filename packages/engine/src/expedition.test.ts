@@ -56,7 +56,6 @@ function makeDisciple(overrides: Partial<Disciple> & Pick<Disciple, "id">): Disc
     realmLevel,
     zhenyuan: 0,
     breakthroughFailures: 0,
-    role: overrides.role ?? "inner",
     rootType: "single",
     rootElements: ["metal"],
     attributes: { strength: 50, soulPower: 50, agility: 50, physique: 50, comprehension: 50 },
@@ -271,11 +270,10 @@ describe("历练六事件概率分布与伤势分支（expedition）", () => {
   });
 });
 
-describe("月结流程 9 步顺序锚点（settlement 新增契约，E03-F02）", () => {
-  it("经济→方针→真元突破→生产→历练→NPC→会战→声望胜负→年度衰老", () => {
+describe("月结流程 8 步顺序锚点（settlement 契约）", () => {
+  it("经济→真元突破→生产→历练→NPC→会战→声望胜负→年度衰老", () => {
     assert.deepEqual(MONTHLY_STEP_ORDER, [
       "economy",
-      "policy",
       "breakthrough",
       "production",
       "expedition",
@@ -289,6 +287,7 @@ describe("月结流程 9 步顺序锚点（settlement 新增契约，E03-F02）"
       assert.ok(index >= 0, step);
       return index;
     };
+    assert.ok(indexOf("economy") < indexOf("breakthrough"));
     assert.ok(indexOf("production") < indexOf("expedition"));
     assert.ok(indexOf("rival") < indexOf("sectWar"));
     assert.equal(MONTHLY_STEP_ORDER[MONTHLY_STEP_ORDER.length - 1], "aging");
@@ -315,13 +314,14 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
       const seed = `wire-harvest-${i}`;
       if (eventAt(seed, 2) !== "harvest") continue;
       const game = createGame({ seed, sectName: "接线宗" });
-      const { state, result } = settleMonthly(game, "explore");
+      const { state, result } = settleMonthly(game);
       assert.ok(result.expedition);
       assert.equal(result.expedition.event, "harvest");
       assert.ok(
         result.expedition.spiritStonesDelta >= 50 && result.expedition.spiritStonesDelta <= 150,
       );
-      assert.equal(state.spiritStones, 2000 + 10 - 15 + result.expedition.spiritStonesDelta);
+      // 外门供奉 200 − 俸禄 30 = +170，另加历练收获。
+      assert.equal(state.spiritStones, 2000 + 170 + result.expedition.spiritStonesDelta);
       assert.ok(
         state.chronicle.some((entry) => entry.kind === "normal" && entry.text.includes("外出历练")),
       );
@@ -342,7 +342,7 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
         opponentProvider: () => opponent,
       });
       discipleOf(game, "d-1").talentIds = ["t-deep-fortune"];
-      const boosted = settleMonthly(game, "explore");
+      const boosted = settleMonthly(game);
       assert.equal(boosted.result.expedition?.event, "harvest");
       assert.equal(
         boosted.result.expedition?.spiritStonesDelta,
@@ -358,7 +358,7 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
       const seed = `wire-spar-${i}`;
       if (eventAt(seed, 2) !== "spar") continue;
       const game = createGame({ seed, sectName: "接线宗" });
-      const { state, result } = settleMonthly(game, "explore", {
+      const { state, result } = settleMonthly(game, {
         opponentProvider: () => opponent,
       });
       const report = result.expedition;
@@ -367,8 +367,8 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
       assert.equal(state.battles?.[0]?.source, "expedition");
       const sparPrestige = report.battle.winner === "A" ? 2 : report.battle.winner === "B" ? -1 : 0;
       const sparMorale = report.battle.winner === "A" ? 1 : report.battle.winner === "B" ? -1 : 0;
-      assert.equal(result.prestigeDelta, 1 + sparPrestige);
-      assert.equal(result.moraleDelta, -2 + sparMorale);
+      assert.equal(result.prestigeDelta, sparPrestige);
+      assert.equal(result.moraleDelta, sparMorale + 1);
       return;
     }
     throw new Error("test_setup_spar_seed_not_found");
@@ -381,7 +381,7 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
       const branch = injuryForRoll(deterministicRoll(`${seed}:expedition:2:danger`));
       if (branch === "none") continue;
       const game = createGame({ seed, sectName: "接线宗" });
-      const { state, result } = settleMonthly(game, "explore");
+      const { state, result } = settleMonthly(game);
       const injuredId = result.expedition?.injury?.discipleId;
       assert.ok(injuredId);
       const months = result.expedition?.injury?.months ?? 0;
@@ -402,10 +402,10 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
       if (injuryForRoll(deterministicRoll(`${seed}:expedition:2:danger`)) === "none") continue;
       if (eventAt(seed, 3) !== "spar") continue;
       const game = createGame({ seed, sectName: "接线宗" });
-      const first = settleMonthly(game, "explore", { opponentProvider: () => opponent });
+      const first = settleMonthly(game, { opponentProvider: () => opponent });
       const injuredId = first.result.expedition?.injury?.discipleId;
       assert.ok(injuredId);
-      const second = settleMonthly(first.state, "explore", { opponentProvider: () => opponent });
+      const second = settleMonthly(first.state, { opponentProvider: () => opponent });
       assert.ok(second.result.expedition?.battle);
       assert.notEqual(second.result.expedition.participantId, injuredId);
       return;
@@ -413,14 +413,14 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
     throw new Error("test_setup_banned_seed_not_found");
   });
 
-  it("休养方针：全体伤势恢复月数 −2（不超过当月）", () => {
+  it("伤势按回目自然恢复：月结不回退 untilTurn（到期次月可出战）", () => {
     const game = createGame({ seed: "wire-rest", sectName: "接线宗" });
     discipleOf(game, "d-1").injury = { kind: "severe", untilTurn: 5 };
-    const { state } = settleMonthly(game, "rest");
+    const { state } = settleMonthly(game);
     assert.equal(state.currentTurn, 2);
-    assert.equal(discipleOf(state, "d-1").injury?.untilTurn, 3);
-    const { state: after2 } = settleMonthly(state, "rest");
-    assert.equal(discipleOf(after2, "d-1").injury?.untilTurn, 3);
+    assert.equal(discipleOf(state, "d-1").injury?.untilTurn, 5);
+    const { state: after2 } = settleMonthly(state);
+    assert.equal(discipleOf(after2, "d-1").injury?.untilTurn, 5);
   });
 
   it("奇遇掉落接线：书入藏经阁、装备（档 1–2）与丹药入仓库", () => {
@@ -428,7 +428,7 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
       const seed = `wire-windfall-${i}`;
       if (eventAt(seed, 2) !== "windfall") continue;
       const game = createGame({ seed, sectName: "接线宗" });
-      const { state, result } = settleMonthly(game, "explore");
+      const { state, result } = settleMonthly(game);
       const reward = result.expedition?.reward;
       assert.ok(reward);
       if (reward.type === "gongfa_book") {
@@ -459,7 +459,7 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
       const seed = `wire-pill-${i}`;
       if (eventAt(seed, 2) !== "pill") continue;
       const game = createGame({ seed, sectName: "接线宗" });
-      const { state, result } = settleMonthly(game, "explore");
+      const { state, result } = settleMonthly(game);
       const reward = result.expedition?.reward;
       assert.ok(reward?.type === "pill");
       assert.ok(
@@ -470,11 +470,17 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
     throw new Error("test_setup_pill_seed_not_found");
   });
 
-  it("资源危机月方针未执行：不触发遭遇事件、声望不增", () => {
+  it("资源危机月停摆：不触发遭遇事件、声望不增", () => {
     const game = createGame({ seed: "wire-crisis", sectName: "接线宗" });
     const poor = structuredClone(game);
+    // 外门恒满员供奉 200；内门膨胀到 53 人（俸禄 530 > 供奉 200）且灵石归零 → 危机。
     poor.spiritStones = 0;
-    const { state, result } = settleMonthly(poor, "explore");
+    const template = poor.disciples[0];
+    assert.ok(template);
+    for (let i = 0; i < 50; i++) {
+      poor.disciples.push({ ...template, id: `extra-${i}` });
+    }
+    const { state, result } = settleMonthly(poor);
     assert.equal(result.crisis, true);
     assert.equal(result.expedition, undefined);
     assert.equal(state.prestige, game.prestige);

@@ -1,10 +1,11 @@
 // 弟子生成：名字/性别/五维/灵根/寿命/天赋全部由 seed + discipleId 确定性派生。
+// 仅生成内门弟子：外门恒按宗门等级上限满员、不入个体名册。
 import { generateDiscipleAttributes } from "./attributes.js";
 import { generateDiscipleMaxLifespan } from "./lifespan.js";
 import { generateDiscipleProfile } from "./naming.js";
 import { realmStageForLevel } from "./realms.js";
 import { generateRootProfile } from "./roots.js";
-import type { Disciple, DiscipleRole } from "./state.js";
+import type { Disciple } from "./state.js";
 import { generateTalentIds } from "./talents.js";
 
 export type GenerateDiscipleInput = {
@@ -14,7 +15,6 @@ export type GenerateDiscipleInput = {
   ordinal: number;
   usedNames?: Iterable<string>;
   age?: number;
-  role: DiscipleRole;
 };
 
 export function generateDisciple(input: GenerateDiscipleInput): Disciple {
@@ -36,7 +36,6 @@ export function generateDisciple(input: GenerateDiscipleInput): Disciple {
     realmLevel: 1,
     zhenyuan: 0,
     breakthroughFailures: 0,
-    role: input.role,
     rootType,
     rootElements,
     attributes: generateDiscipleAttributes({

@@ -1,3 +1,4 @@
+/* 弟子详情：档案/五维/修炼视图/管理操作。 */
 .detail-head {
   display: flex;
   flex-direction: row;
@@ -10,22 +11,81 @@
   font-weight: 700;
 }
 
+.detail-name-wrap {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+}
+
+/* 候选预览徽标：未入门弟子详情页头部标记。 */
+.candidate-badge {
+  flex-shrink: 0;
+  padding: 2rpx 14rpx;
+  border-radius: 999rpx;
+  background: var(--accent);
+  color: #fff;
+  font-size: 20rpx;
+  line-height: 34rpx;
+}
+
 .attr-row {
   display: flex;
   flex-direction: row;
   justify-content: space-between;
-  padding: 10rpx 0;
-  border-bottom: 2rpx solid #f0e8d8;
+  gap: 16rpx;
+  padding: 12rpx 0;
+  border-bottom: 2rpx solid var(--line);
 }
 
 .attr-row:last-child {
   border-bottom: none;
 }
 
+/* 五维：五个属性排成一排。 */
+.attr-grid {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+}
+
+.attr-cell {
+  width: 20%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6rpx;
+  padding: 16rpx 0;
+}
+
+.attr-cell-value {
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+/* 战斗属性：六项两排放完（每排 3 个）。 */
+.combat-grid {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.combat-cell {
+  width: 33.33%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6rpx;
+  padding: 16rpx 0;
+}
+
 .talent-row {
   display: flex;
   flex-direction: column;
-  padding: 10rpx 0;
+  padding: 12rpx 0;
   gap: 4rpx;
 }
 
@@ -36,17 +96,33 @@
 .detail-actions {
   display: flex;
   flex-direction: column;
-  gap: 10rpx;
-  align-items: flex-start;
+  gap: 12rpx;
+  align-items: stretch;
+}
+
+.detail-actions .btn-mini {
+  align-self: stretch;
+  height: 72rpx;
+  line-height: 72rpx;
+  border-radius: 14rpx;
+  font-size: 26rpx;
 }
 
 .detail-panel {
-  margin-top: 12rpx;
-  padding: 12rpx;
-  background: #f6efdd;
-  border-radius: 12rpx;
+  margin-top: 16rpx;
+  padding: 16rpx;
+  background: var(--card-2);
+  border: 2rpx solid var(--line);
+  border-radius: 14rpx;
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
-  align-items: flex-start;
+  gap: 10rpx;
+  align-items: stretch;
+}
+
+.detail-panel .btn-mini {
+  align-self: stretch;
+  height: 68rpx;
+  line-height: 68rpx;
+  border-radius: 12rpx;
 }

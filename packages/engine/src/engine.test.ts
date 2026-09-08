@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { BattleReport } from "./battle.js";
+import { SPELLS } from "./catalog.js";
 import { buildCombatProfile } from "./combat-profile.js";
 import {
   appointElder,
@@ -10,7 +11,6 @@ import {
   discipleCultivationView,
   learnArt,
   listRecruitCandidates,
-  promoteToInner,
   recruitDisciple,
   upgradeSect,
   usePill,
@@ -20,9 +20,11 @@ import { deterministicRoll } from "./hash.js";
 import { assignWorkshopJob } from "./production.js";
 import { realmStageForLevel } from "./realms.js";
 import { ROOT_MULTIPLIERS } from "./roots.js";
+import { OUTER_INCOME_PER_DISCIPLE, sectLimitsFor } from "./sect.js";
 import {
   BATTLE_LOG_BYTE_BUDGET,
   BATTLE_LOG_LIMIT,
+  EPIPHANY_CHANCE_PCT,
   ZHENYUAN_BASE,
   ZHENYUAN_COMPREHENSION_COEFF,
   currentSuccessRate,
@@ -43,11 +45,11 @@ function discipleOf(state: GameState, id: string) {
   return disciple;
 }
 
-function runMonths(state: GameState, months: number, policy: Parameters<typeof settleMonthly>[1]) {
+function runMonths(state: GameState, months: number) {
   let current = state;
   const results: SettlementResult[] = [];
   for (let i = 0; i < months; i++) {
-    const outcome = settleMonthly(current, policy);
+    const outcome = settleMonthly(current);
     current = outcome.state;
     results.push(outcome.result);
   }
@@ -55,14 +57,13 @@ function runMonths(state: GameState, months: number, policy: Parameters<typeof s
 }
 
 describe("开局", () => {
-  it("初始状态：1 级宗门、3 内门 + 20 外门、灵石 2000、士气 70", () => {
+  it("初始状态：1 级宗门、3 弟子、灵石 2000、士气 70", () => {
     const state = newGame();
     assert.equal(state.sectRank, 1);
     assert.equal(state.currentTurn, 1);
     assert.equal(state.spiritStones, 2000);
     assert.equal(state.morale, 70);
-    assert.equal(state.disciples.filter((disciple) => disciple.role === "inner").length, 3);
-    assert.equal(state.disciples.filter((disciple) => disciple.role === "outer").length, 20);
+    assert.equal(state.disciples.length, 3);
     assert.equal(
       state.disciples.every((disciple) => disciple.realmLevel === 1),
       true,
@@ -82,18 +83,33 @@ describe("开局", () => {
 });
 
 describe("月度结算", () => {
-  it("12 月休养生息：回合 13、灵石 +120、年度衰老 +1 岁", () => {
-    const { state, results } = runMonths(newGame(), 12, "rest");
+  it("12 月推进：回合 13、月结收支 = 灵脉产出 − 俸禄 + 历练收获、年度衰老 +1 岁", () => {
+    let state = newGame();
+    const results: SettlementResult[] = [];
+    for (let month = 0; month < 12; month++) {
+      // 经济：月入 = 外门供奉（外门恒按等级上限满员 × 人均 2），俸禄 = 名册 ×10；历练另计。
+      const innerCount = state.disciples.length;
+      const settled = settleMonthly(state);
+      state = settled.state;
+      results.push(settled.result);
+      const expected = settled.result.crisis
+        ? 0
+        : sectLimitsFor(state.sectRank).outerLimit * OUTER_INCOME_PER_DISCIPLE -
+          innerCount * 10 +
+          (settled.result.expedition?.spiritStonesDelta ?? 0);
+      assert.equal(settled.result.spiritStonesDelta, expected, `month ${month + 1}`);
+    }
     assert.equal(state.currentTurn, 13);
-    // 每月：外门供奉 40 − 内门俸禄 30 = +10
-    assert.equal(state.spiritStones, 2000 + 120);
     assert.equal(
-      results.every((result) => result.policy === "rest"),
-      true,
+      state.spiritStones,
+      2000 + results.reduce((sum, result) => sum + result.spiritStonesDelta, 0),
     );
-    // 第 12 月年度衰老：全体 +1 岁
+    // 第 12 月年度衰老：开局名册全体 +1 岁（来投新弟子 16 岁入门，未逢年度节点不在其列）。
+    const initialIds = new Set(newGame().disciples.map((disciple) => disciple.id));
     assert.equal(
-      state.disciples.every((disciple) => disciple.age >= 17),
+      state.disciples
+        .filter((disciple) => initialIds.has(disciple.id))
+        .every((disciple) => disciple.age >= 17),
       true,
     );
     assert.equal(
@@ -102,37 +118,37 @@ describe("月度结算", () => {
     );
   });
 
-  it("士气上限 100、休养每月 +5", () => {
-    const { state } = runMonths(newGame(), 8, "rest");
-    assert.equal(state.morale, 100);
+  it("基线士气：无事月 +1、上限 100（seed slice-seed-1 第 2 月为危险-安全事件，无奖惩）", () => {
+    const { state: after } = settleMonthly(newGame());
+    assert.equal(after.morale, 70 + 1);
+    const prepared = { ...structuredClone(newGame()), morale: 100 };
+    const { state: capped } = settleMonthly(prepared);
+    assert.equal(capped.morale, 100);
   });
 
-  it("闭关修炼消耗灵石且真元增幅", () => {
+  it("每月自动历练：遭遇事件落 result.expedition（危险-安全月无灵石入账）", () => {
     const state = newGame();
-    const before = state.spiritStones;
-    const { state: after } = settleMonthly(state, "cultivate");
-    assert.equal(after.spiritStones, before + 10 - 15);
-    const first = discipleOf(after, "d-1");
-    const gain = monthlyZhenyuanGain(after, first);
-    const plain = monthlyZhenyuanGain({ ...after, policy: "rest" }, first);
-    assert.ok(gain > plain, `cultivate gain ${gain} 应高于普通 ${plain}`);
-  });
-
-  it("外出历练触发遭遇事件：声望 +1、士气 −2（收获 50% 月份得灵石，D-014 六事件表取代 M1 固定拾取）", () => {
-    const state = newGame();
-    const { state: after, result } = settleMonthly(state, "explore");
-    assert.equal(result.prestigeDelta, 1);
-    assert.equal(result.moraleDelta, -2);
-    // seed slice-seed-1 第 2 月为「危险-安全」事件：无灵石入账（六事件 golden 见 expedition.test.ts）。
+    const { state: after, result } = settleMonthly(state);
     assert.equal(result.expedition?.event, "danger");
-    assert.equal(after.spiritStones, 2000 + 10 - 15 + 0);
+    assert.equal(result.moraleDelta, 1);
+    assert.equal(result.prestigeDelta, 0);
+    // 灵脉产出 200，俸禄 30 → +170（危险-安全月历练无灵石入账）。
+    assert.equal(after.spiritStones, 2000 + 170 + 0);
     assert.ok(after.chronicle.some((entry) => entry.text.includes("历练")));
   });
 
-  it("资源危机：方针不执行、成本勾销、士气 −3", () => {
-    const state = { ...structuredClone(newGame()), spiritStones: 0 };
-    const { state: after, result } = settleMonthly(state, "cultivate");
+  it("资源危机：当月停摆（无历练）、收支勾销、士气 −3", () => {
+    const state = structuredClone(newGame());
+    // 灵脉产出 200；把名册膨胀到 53 人（俸禄 530 > 产出 200）且灵石归零 → 危机。
+    state.spiritStones = 0;
+    const template = state.disciples[0];
+    assert.ok(template);
+    for (let i = 0; i < 50; i++) {
+      state.disciples.push({ ...template, id: `extra-${i}` });
+    }
+    const { state: after, result } = settleMonthly(state);
     assert.equal(result.crisis, true);
+    assert.equal(result.expedition, undefined);
     assert.equal(after.spiritStones, 0);
     assert.equal(after.morale, 70 - 3);
     assert.ok(after.chronicle.some((entry) => entry.kind === "warning"));
@@ -160,7 +176,7 @@ describe("月度结算", () => {
     disciple.zhenyuan = realmStageForLevel(1).requiredZhenyuan;
     disciple.breakthroughFailures = 20;
     assert.equal(currentSuccessRate(disciple, realmStageForLevel(1).baseSuccessRate), 100);
-    const { state: after, result } = settleMonthly(state, "rest");
+    const { state: after, result } = settleMonthly(state);
     const event = result.breakthroughs.find((entry) => entry.discipleId === "d-1");
     assert.ok(event);
     assert.equal(event.outcome, "success");
@@ -171,69 +187,141 @@ describe("月度结算", () => {
     assert.ok(after.chronicle.some((entry) => entry.text.includes("突破至练气中期")));
   });
 
+  it("突破顿悟：突破成功 20% 概率直接领悟一门未修法术（不经藏经阁）", () => {
+    // 扫描 seed：锁定一个顿悟掷骰命中（< EPIPHANY_CHANCE_PCT）的确定性样本。
+    let found: string | undefined;
+    for (let i = 0; i < 50 && !found; i++) {
+      const seed = `epiphany-${i}`;
+      if (deterministicRoll(`${seed}:epiphany:d-1:2`) < EPIPHANY_CHANCE_PCT) found = seed;
+    }
+    assert.ok(found, "test_setup_epiphany_seed_not_found");
+    const state = newGame(found);
+    const disciple = discipleOf(state, "d-1");
+    disciple.zhenyuan = realmStageForLevel(1).requiredZhenyuan;
+    disciple.breakthroughFailures = 20; // 成功率封顶 100，保证突破成功
+    const { state: after, result } = settleMonthly(state);
+    const event = result.breakthroughs.find((entry) => entry.discipleId === "d-1");
+    assert.ok(event);
+    assert.equal(event.outcome, "success");
+    assert.ok(event.epiphanySpellId, "epiphany should trigger for the scanned seed");
+    assert.equal(
+      event.epiphanySpellName,
+      SPELLS.find((spell) => spell.id === event.epiphanySpellId)?.name,
+    );
+    const upgraded = discipleOf(after, "d-1");
+    assert.deepEqual(upgraded.spellIds, [event.epiphanySpellId]);
+    assert.ok(
+      after.chronicle.some((entry) =>
+        entry.text.includes(`顿悟法术《${event.epiphanySpellName}》`),
+      ),
+    );
+  });
+
+  it("突破顿悟未命中：突破成功但不新增法术", () => {
+    let missed: string | undefined;
+    for (let i = 0; i < 50 && !missed; i++) {
+      const seed = `no-epiphany-${i}`;
+      if (deterministicRoll(`${seed}:epiphany:d-1:2`) >= EPIPHANY_CHANCE_PCT) missed = seed;
+    }
+    assert.ok(missed, "test_setup_no_epiphany_seed_not_found");
+    const state = newGame(missed);
+    const disciple = discipleOf(state, "d-1");
+    disciple.zhenyuan = realmStageForLevel(1).requiredZhenyuan;
+    disciple.breakthroughFailures = 20;
+    const { state: after, result } = settleMonthly(state);
+    const event = result.breakthroughs.find((entry) => entry.discipleId === "d-1");
+    assert.ok(event);
+    assert.equal(event.outcome, "success");
+    assert.equal(event.epiphanySpellId, undefined);
+    assert.equal(discipleOf(after, "d-1").spellIds, undefined);
+  });
+
+  it("突破顿悟已修满 2 门：命中概率也不再新增", () => {
+    let found: string | undefined;
+    for (let i = 0; i < 50 && !found; i++) {
+      const seed = `epiphany-full-${i}`;
+      if (deterministicRoll(`${seed}:epiphany:d-1:2`) < EPIPHANY_CHANCE_PCT) found = seed;
+    }
+    assert.ok(found, "test_setup_epiphany_full_seed_not_found");
+    const state = newGame(found);
+    const disciple = discipleOf(state, "d-1");
+    disciple.zhenyuan = realmStageForLevel(1).requiredZhenyuan;
+    disciple.breakthroughFailures = 20;
+    const knownIds = SPELLS.slice(0, 2).map((spell) => spell.id);
+    disciple.spellIds = [...knownIds];
+    const { state: after, result } = settleMonthly(state);
+    const event = result.breakthroughs.find((entry) => entry.discipleId === "d-1");
+    assert.ok(event);
+    assert.equal(event.outcome, "success");
+    assert.equal(event.epiphanySpellId, undefined);
+    assert.deepEqual(discipleOf(after, "d-1").spellIds, knownIds);
+  });
+
   it("突破失败：真元清零、失败积累 +1、成功率提升", () => {
     const state = newGame();
     const disciple = discipleOf(state, "d-1");
     disciple.zhenyuan = realmStageForLevel(1).requiredZhenyuan;
     disciple.talentIds = [];
     disciple.attributes.comprehension = 50;
-    const { state: after, result } = settleMonthly(state, "rest");
+    const { state: after, result } = settleMonthly(state);
     const event = result.breakthroughs.find((entry) => entry.discipleId === "d-1");
     assert.ok(event);
     const upgraded = discipleOf(after, "d-1");
     assert.equal(upgraded.zhenyuan, 0);
     if (event.outcome === "failure") {
-      assert.equal(event.successRate, 60);
+      assert.equal(event.successRate, 50);
       assert.equal(upgraded.breakthroughFailures, 1);
-      assert.equal(currentSuccessRate(upgraded, realmStageForLevel(1).baseSuccessRate), 65);
+      assert.equal(currentSuccessRate(upgraded, realmStageForLevel(1).baseSuccessRate), 55);
     } else {
       assert.equal(upgraded.realmLevel, 2);
     }
   });
 
-  it("元婴前期圆满突破 → 飞升结局，终局后拒绝月结", () => {
+  it("元婴前期圆满止步：不再积累真元、不再突破，月结照常推进", () => {
     const state = newGame();
     const disciple = discipleOf(state, "d-1");
     disciple.realmLevel = 10;
     disciple.realm = realmStageForLevel(10).realm;
-    disciple.zhenyuan = realmStageForLevel(10).requiredZhenyuan;
-    disciple.breakthroughFailures = 20;
-    const { state: after, result } = settleMonthly(state, "rest");
-    assert.equal(after.ending?.kind, "ascension");
-    assert.ok(result.breakthroughs.some((entry) => entry.outcome === "ascended"));
-    assert.throws(() => settleMonthly(after, "rest"), /game_already_ended/);
+    disciple.zhenyuan = 999_999;
+    const { state: after, result } = settleMonthly(state);
+    assert.equal(after.ending, undefined);
+    assert.ok(!result.breakthroughs.some((entry) => entry.discipleId === "d-1"));
+    assert.equal(discipleOf(after, "d-1").zhenyuan, 999_999);
+    assert.equal(settleMonthly(after).state.ending, undefined);
   });
 
-  it("年度坐化：逝者入名录、士气扣减、外门递补内门", () => {
+  it("年度坐化：逝者入名录、士气扣减、新弟子递补席位", () => {
     const prepared = newGame();
-    // 内门 d-1 与外门 d-4 将在第 12 月坐化（19 + 1 ≥ 有效坐化年龄 20）。
+    // 内门 d-1 将在第 12 月坐化（19 + 1 ≥ 有效坐化年龄 20）。
     discipleOf(prepared, "d-1").maxLifespan = 20;
-    discipleOf(prepared, "d-4").maxLifespan = 20;
     discipleOf(prepared, "d-1").age = 19;
-    discipleOf(prepared, "d-4").age = 19;
-    const { state: after, results } = runMonths(prepared, 12, "rest");
+    const { state: after, results } = runMonths(prepared, 12);
     const month12 = results.find((result) => result.turn === 12);
     assert.ok(month12);
-    assert.equal(month12.deaths.length, 2);
-    assert.equal(after.fallen.length, 2);
-    // 士气：前 6 月 +5 至 100 封顶；第 12 月 2 人坐化 −10，第 13 月休养 +5。
-    assert.equal(after.morale, 95);
-    // 内门坐化 1 人 → 最强外门递补，内门回到 3 人。
-    assert.equal(after.disciples.filter((disciple) => disciple.role === "inner").length, 3);
+    assert.equal(month12.deaths.length, 1);
+    assert.equal(after.fallen.length, 1);
+    // 士气随结果落账：终值 = 初始 + Σ(月士气增量)，且不越界。
+    const expectedMorale = Math.min(
+      100,
+      Math.max(0, 70 + results.reduce((sum, result) => sum + result.moraleDelta, 0)),
+    );
+    assert.equal(after.morale, expectedMorale);
+    // 坐化 1 人 → 递补 1 人（新弟子入册），名册回到 3 人。
+    assert.equal(after.disciples.length, 3);
     assert.equal(month12.promotions.length, 1);
     assert.ok(after.chronicle.some((entry) => entry.text.includes("坐化仙逝")));
-    assert.ok(after.chronicle.some((entry) => entry.text.includes("递补入内门")));
+    assert.ok(after.chronicle.some((entry) => entry.text.includes("补入内门")));
   });
 
   it("24 月长跑确定性：同 seed 两局 deepEqual", () => {
-    const a = runMonths(newGame("long-run"), 24, "cultivate").state;
-    const b = runMonths(newGame("long-run"), 24, "cultivate").state;
+    const a = runMonths(newGame("long-run"), 24).state;
+    const b = runMonths(newGame("long-run"), 24).state;
     assert.deepEqual(a, b);
   });
 });
 
 describe("管理命令", () => {
-  it("招募候选确定、入册为外门并扣灵石", () => {
+  it("招募候选确定、直入名册并扣灵石", () => {
     const state = newGame();
     const candidates = listRecruitCandidates(state);
     assert.equal(candidates.length, 3);
@@ -242,9 +330,33 @@ describe("管理命令", () => {
     assert.ok(first);
     const { state: after, disciple } = recruitDisciple(state, first.candidateId);
     assert.equal(after.spiritStones, 2000 - 300);
-    assert.equal(after.disciples.length, 24);
-    assert.equal(disciple.role, "outer");
+    assert.equal(after.disciples.length, 4);
+    assert.ok(after.disciples.some((entry) => entry.id === disciple.id));
     assert.equal(disciple.age, 16);
+  });
+
+  it("招募录入所选候选本人（3 选 1 的选择生效，预览即录入档案）", () => {
+    const state = newGame();
+    const candidates = listRecruitCandidates(state);
+    const second = candidates[1];
+    assert.ok(second);
+    const { disciple } = recruitDisciple(state, second.candidateId);
+    assert.match(disciple.id, /^d-\d+$/);
+    assert.equal(disciple.name, second.disciple.name);
+    assert.equal(disciple.gender, second.disciple.gender);
+    assert.equal(disciple.maxLifespan, second.disciple.maxLifespan);
+    assert.equal(disciple.rootType, second.disciple.rootType);
+    assert.deepEqual(disciple.rootElements, second.disciple.rootElements);
+    assert.deepEqual(disciple.attributes, second.disciple.attributes);
+    assert.deepEqual(disciple.talentIds, second.disciple.talentIds);
+    // 选不同候选得到不同档案（选择真实影响结果）
+    const third = candidates[2];
+    assert.ok(third);
+    const { disciple: other } = recruitDisciple(state, third.candidateId);
+    assert.notDeepEqual(
+      { a: disciple.attributes, r: disciple.rootElements, t: disciple.talentIds },
+      { a: other.attributes, r: other.rootElements, t: other.talentIds },
+    );
   });
 
   it("灵石不足招募被拒", () => {
@@ -254,19 +366,17 @@ describe("管理命令", () => {
     assert.throws(() => recruitDisciple(state, first.candidateId), /insufficient_resource/);
   });
 
-  it("提拔内门并受容量约束", () => {
-    let state = newGame();
-    const outers = state.disciples.filter((disciple) => disciple.role === "outer");
-    for (let i = 0; i < 7; i++) {
-      const target = outers[i];
-      assert.ok(target);
-      state = promoteToInner(state, target.id).state;
+  it("招募受内门上限约束（补满至 10 人后拒绝再招募）", () => {
+    let state = { ...structuredClone(newGame()), spiritStones: 100_000 };
+    while (state.disciples.length < 10) {
+      const first = listRecruitCandidates(state)[0];
+      assert.ok(first);
+      state = recruitDisciple(state, first.candidateId).state;
     }
-    assert.equal(state.disciples.filter((disciple) => disciple.role === "inner").length, 10);
-    const overflow = outers[7];
+    assert.equal(state.disciples.length, 10);
+    const overflow = listRecruitCandidates(state)[0];
     assert.ok(overflow);
-    assert.throws(() => promoteToInner(state, overflow.id), /inner_limit_reached/);
-    assert.throws(() => promoteToInner(state, "d-1"), /disciple_already_inner/);
+    assert.throws(() => recruitDisciple(state, overflow.candidateId), /inner_limit_reached/);
   });
 
   it("升阶：境界与灵石条件", () => {
@@ -299,7 +409,7 @@ describe("管理命令", () => {
     const state = newGame();
     const view = discipleCultivationView(state, discipleOf(state, "d-1"));
     assert.equal(view.stageName, "练气前期");
-    assert.equal(view.requiredZhenyuan, 300);
+    assert.equal(view.requiredZhenyuan, 1_000);
     assert.ok(view.monthlyGain > 0);
     assert.ok(view.successRate > 0 && view.successRate <= 100);
   });
@@ -332,10 +442,6 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
     // 藏经阁未拥有被拒。
     assert.throws(() => learnArt(state, "d-2", "tech-jinzhong"), /art_not_in_library/);
     assert.throws(() => learnArt(state, "d-2", "art-none"), /art_not_found/);
-    // 外门不可研读。
-    const outer = state.disciples.find((entry) => entry.role === "outer");
-    assert.ok(outer);
-    assert.throws(() => learnArt(state, outer.id, "tech-hunyuan"), /disciple_not_inner/);
   });
 
   it("功法月结生效：混元功真元 +15%、五维 +2 计入月度真元", () => {
@@ -374,7 +480,7 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
       { pillId: "pill-yanshou", count: 1 },
     ]);
     // 推进一月后重复服用：刷新时长（turn 2 + 12 = 14），不叠加为 ×2.25。
-    after = settleMonthly(after, "rest").state;
+    after = settleMonthly(after).state;
     after = usePill(after, "d-1", "pill-juling").state;
     assert.equal(discipleOf(after, "d-1").spiritFocusUntilTurn, 2 + 12);
     // 仓库耗尽后拒绝。
@@ -396,44 +502,44 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
       monthlyZhenyuanGain(prepared, discipleOf(prepared, "d-1")),
       Math.round(base * 1.5),
     );
-    const { state: after } = settleMonthly(prepared, "rest");
+    const { state: after } = settleMonthly(prepared);
     assert.equal(after.currentTurn, 2);
     assert.equal(monthlyZhenyuanGain(after, discipleOf(after, "d-1")), Math.round(base * 1.5));
-    const { state: after2 } = settleMonthly(after, "rest");
+    const { state: after2 } = settleMonthly(after);
     assert.equal(after2.currentTurn, 3);
     assert.equal(monthlyZhenyuanGain(after2, discipleOf(after2, "d-1")), base);
   });
 
-  it("穿戴装备：仓库取出、旧装备卸下回仓、派生物攻 +档位加成", () => {
+  it("穿戴法宝：仓库取出、旧法宝卸下回仓、派生法威 +档位加成", () => {
     const state = newGame();
     state.warehouse = {
       gear: [
-        { slot: "weapon", tier: 1 },
-        { slot: "weapon", tier: 2 },
+        { slot: "talisman", tier: 1 },
+        { slot: "talisman", tier: 2 },
       ],
       pills: [],
     };
-    const baseAttack = buildCombatProfile(discipleOf(state, "d-1")).physicalAttack;
-    const { state: after1 } = wearGear(state, "d-1", "weapon", 1);
-    assert.deepEqual(discipleOf(after1, "d-1").equippedGear, { weapon: 1 });
-    assert.deepEqual(after1.warehouse?.gear, [{ slot: "weapon", tier: 2 }]);
-    assert.equal(buildCombatProfile(discipleOf(after1, "d-1")).physicalAttack, baseAttack + 10);
+    const baseMagic = buildCombatProfile(discipleOf(state, "d-1")).magicPower;
+    const { state: after1 } = wearGear(state, "d-1", "talisman", 1);
+    assert.deepEqual(discipleOf(after1, "d-1").equippedGear, { talisman: 1 });
+    assert.deepEqual(after1.warehouse?.gear, [{ slot: "talisman", tier: 2 }]);
+    assert.equal(buildCombatProfile(discipleOf(after1, "d-1")).magicPower, baseMagic + 8);
     // 替换：档 2 上身、档 1 回仓。
-    const { state: after2 } = wearGear(after1, "d-1", "weapon", 2);
-    assert.deepEqual(discipleOf(after2, "d-1").equippedGear, { weapon: 2 });
-    assert.deepEqual(after2.warehouse?.gear, [{ slot: "weapon", tier: 1 }]);
-    assert.equal(buildCombatProfile(discipleOf(after2, "d-1")).physicalAttack, baseAttack + 25);
+    const { state: after2 } = wearGear(after1, "d-1", "talisman", 2);
+    assert.deepEqual(discipleOf(after2, "d-1").equippedGear, { talisman: 2 });
+    assert.deepEqual(after2.warehouse?.gear, [{ slot: "talisman", tier: 1 }]);
+    assert.equal(buildCombatProfile(discipleOf(after2, "d-1")).magicPower, baseMagic + 14);
     // 仓库无此装备被拒。
-    assert.throws(() => wearGear(after2, "d-1", "armor", 4), /gear_not_in_warehouse/);
+    assert.throws(() => wearGear(after2, "d-1", "talisman", 4), /gear_not_in_warehouse/);
   });
 
-  it("资源长老：外门供奉 +20% 月结生效（20 外门月供奉 40 → 48）；长老不修炼", () => {
+  it("资源长老：灵脉产出 +20% 月结生效（200 → 240）；长老不修炼", () => {
     let state = newGame();
     state = appointElder(state, "d-1", "resource").state;
     assert.equal(state.elders?.resource, "d-1");
-    const { state: after } = settleMonthly(state, "rest");
-    // 供奉 round(20×2×1.2) = 48，俸禄 30 → +18；休养士气 +5。
-    assert.equal(after.spiritStones, 2000 + 48 - 30);
+    const { state: after } = settleMonthly(state);
+    // 产出 round(200×1.2) = 240，俸禄 30 → +210（危险-安全月历练无灵石入账）。
+    assert.equal(after.spiritStones, 2000 + 240 - 30);
     // 长老不修炼：真元零增长。
     assert.equal(discipleOf(after, "d-1").zhenyuan, 0);
     assert.ok(discipleOf(after, "d-2").zhenyuan > 0);
@@ -482,14 +588,14 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
       if (withElder) return appointElder(state, "d-1", "war").state;
       return state;
     };
-    const withoutElder = settleMonthly(setup(found.seed, false), "rest");
+    const withoutElder = settleMonthly(setup(found.seed, false));
     const failureEvent = withoutElder.result.breakthroughs.find(
       (entry) => entry.discipleId === "d-2",
     );
     assert.ok(failureEvent);
     assert.equal(failureEvent.outcome, "failure");
     assert.equal(failureEvent.successRate, found.rate0);
-    const withElder = settleMonthly(setup(found.seed, true), "rest");
+    const withElder = settleMonthly(setup(found.seed, true));
     const successEvent = withElder.result.breakthroughs.find((entry) => entry.discipleId === "d-2");
     assert.ok(successEvent);
     assert.equal(successEvent.outcome, "success");
@@ -498,7 +604,7 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
   });
 });
 
-describe("战报存档预算（快照 <100KB 约束，设计 D-022）", () => {
+describe("战报存档预算（快照 <128KB 约束，设计 D-022）", () => {
   const bigReport = (index: number): BattleReport => ({
     seed: `report-${index}`,
     winner: "A",

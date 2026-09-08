@@ -2,8 +2,36 @@
 <html>
   <head>
     <meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
-    <meta content="width=device-width,initial-scale=1,user-scalable=no" name="viewport" />
+    <meta
+      content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"
+      name="viewport"
+    />
+    <meta name="theme-color" content="#2b2420" />
     <title>掌门，不好了</title>
+    <script>
+      // 9:16 竖屏舞台：视口比 9:16 更宽（桌面/横屏）时，按高度定宽居中成手机画幅；
+      // 手机竖屏则全屏铺满。rem 基准随舞台宽度缩放（编译期 40rpx = 1rem，750rpx = 18.75rem），
+      // 使界面在任何窗口下都保持手机端比例。
+      (function () {
+        var doc = document.documentElement;
+        function fit() {
+          var w = window.innerWidth;
+          var h = window.innerHeight;
+          var stageW = Math.min(w, (h * 9) / 16, 520);
+          var framed = w > stageW + 1;
+          doc.classList.toggle("stage-framed", framed);
+          doc.style.setProperty("--stage-w", framed ? Math.round(stageW) + "px" : "100vw");
+          doc.style.setProperty(
+            "--stage-h",
+            framed ? Math.round((stageW * 16) / 9) + "px" : "100%",
+          );
+          doc.style.fontSize = (((framed ? stageW : w) / 375) * 20).toFixed(3) + "px";
+        }
+        fit();
+        window.addEventListener("resize", fit);
+        window.addEventListener("orientationchange", fit);
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

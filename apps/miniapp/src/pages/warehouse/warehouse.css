@@ -1,11 +1,12 @@
+/* 仓库·藏经阁：装备/丹药/书册列表。 */
 .stock-row {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  gap: 12rpx;
-  padding: 12rpx 0;
-  border-bottom: 2rpx solid #f0e8d8;
+  gap: 16rpx;
+  padding: 16rpx 0;
+  border-bottom: 2rpx solid var(--line);
 }
 
 .stock-row:last-child {
@@ -15,13 +16,7 @@
 .stock-info {
   display: flex;
   flex-direction: column;
-  gap: 4rpx;
+  gap: 6rpx;
   flex: 1;
-}
-
-.btn-mini {
-  align-self: center;
-  font-size: 24rpx;
-  padding: 4rpx 18rpx;
-  line-height: 1.6;
+  min-width: 0;
 }

@@ -1,7 +1,7 @@
 // 战斗属性派生：唯一公式 owner（设计文档 §战斗系统·属性派生表，D-010）。玩家与 NPC 共用，无 clamp 例外。
-// deriveCombatProfile：纯公式（输入为已聚合的装备/天赋旋钮与五维）；
-// buildCombatProfile：弟子快照适配层（聚合天赋/功法/已穿戴装备 → 有效五维 clamp(1,100) → 公式），
-// 并返回分来源明细（基础/天赋/功法/装备）供 UI tooltip。
+// deriveCombatProfile：纯公式（输入为已聚合的法宝/天赋旋钮与五维）；
+// buildCombatProfile：弟子快照适配层（聚合天赋/功法/已穿戴法宝 → 有效五维 clamp(1,100) → 公式），
+// 并返回分来源明细（基础/天赋/功法/法宝）供 UI tooltip。
 // 本模块纯派生、无掷骰。
 import { ATTRIBUTE_KEYS } from "./attributes.js";
 import type { DiscipleAttributes } from "./attributes.js";
@@ -11,29 +11,33 @@ import type { Disciple } from "./state.js";
 import { talentById, talentsAttributeFlat } from "./talents.js";
 
 // ─── 派生公式常量（设计 §战斗系统·属性派生）─────────────────────────────
+// 生命/攻击/法威/防御均为「等级×五维」耦合式：等级是乘区、五维是基数，境界压制为主、先天五维为辅。
 
-/** 最大生命 = 100 + 体魄×5 + (实力等级−1)×50。 */
+/** 最大生命 = 100 + 实力等级×体魄 + (实力等级−1)×50。 */
 export const COMBAT_BASE_HP = 100;
-export const HP_PER_PHYSIQUE = 5;
+export const HP_PHYSIQUE_PER_LEVEL = 1;
 export const HP_PER_EXTRA_REALM_LEVEL = 50;
-/** 物理攻击 = 力量×2 + 武器攻击。 */
-export const ATTACK_PER_STRENGTH = 2;
-/** 法术威力（法威）= 魂力×2 + 法宝法威。 */
-export const SPELL_POWER_PER_SOUL_POWER = 2;
-/** 防御 = ⌊体魄×1.5 + 护甲防御⌋ + 功法防御平加。 */
-export const DEFENSE_PER_PHYSIQUE = 1.5;
-/** 暴击率 = 5 + 天赋暴击（上限 50）；暴伤 1.5×（见 battle.ts 的 CRIT_MULTIPLIER）。 */
-export const BASE_CRIT_RATE = 5;
+/** 物理攻击 = 30 + 实力等级×(力量/4) + (实力等级−1)×10。 */
+export const ATTACK_BASE = 30;
+export const ATTACK_STRENGTH_DIVISOR = 4;
+export const ATTACK_FLAT_PER_REALM_LEVEL = 10;
+/** 法术威力（法威）= 30 + 实力等级×(魂力/4) + (实力等级−1)×10 + 法宝法威。 */
+export const MAGIC_BASE = 30;
+export const MAGIC_SOUL_POWER_DIVISOR = 4;
+export const MAGIC_FLAT_PER_REALM_LEVEL = 10;
+/** 防御 = ⌊5 + 实力等级×(体魄/4) + (实力等级−1)×4⌋ + 功法防御平加（成长慢于攻击，保伤害不被稀释）。 */
+export const DEFENSE_BASE = 5;
+export const DEFENSE_PHYSIQUE_DIVISOR = 4;
+export const DEFENSE_FLAT_PER_REALM_LEVEL = 4;
+/** 暴击率 = 10 + 悟性/4 + 天赋暴击（上限 50）；暴伤 2×（见 battle.ts 的 CRIT_MULTIPLIER）。 */
+export const BASE_CRIT_RATE = 10;
+export const CRIT_COMPREHENSION_DIVISOR = 4;
 export const MAX_CRIT_RATE = 50;
 
 export type CombatProfileInput = {
   realmLevel: number;
   attributes: DiscipleAttributes;
-  /** 武器攻击平加（装备档 1–4 → 10/25/45/70）。 */
-  weaponAttack?: number;
-  /** 护甲防御平加（装备档 1–4 → 10/25/45/70）。 */
-  armorDefense?: number;
-  /** 法宝法威平加（装备档 1–4 → 8/14/22/32）。 */
+  /** 法宝法威平加（法宝档 1–4 → 8/14/22/32）。 */
   artifactMagic?: number;
   /** 天赋先攻平加（迅雷之势 +3）。 */
   firstStrikeFlat?: number;
@@ -67,19 +71,37 @@ export type CombatProfile = {
 
 export function deriveCombatProfile(input: CombatProfileInput): CombatProfile {
   const attributes = input.attributes;
+  const level = input.realmLevel;
   return {
     maxHp:
       COMBAT_BASE_HP +
-      attributes.physique * HP_PER_PHYSIQUE +
-      (input.realmLevel - 1) * HP_PER_EXTRA_REALM_LEVEL,
-    physicalAttack: attributes.strength * ATTACK_PER_STRENGTH + (input.weaponAttack ?? 0),
-    magicPower: attributes.soulPower * SPELL_POWER_PER_SOUL_POWER + (input.artifactMagic ?? 0),
+      attributes.physique * HP_PHYSIQUE_PER_LEVEL * level +
+      (level - 1) * HP_PER_EXTRA_REALM_LEVEL,
+    physicalAttack: Math.round(
+      ATTACK_BASE +
+        (attributes.strength / ATTACK_STRENGTH_DIVISOR) * level +
+        (level - 1) * ATTACK_FLAT_PER_REALM_LEVEL,
+    ),
+    magicPower:
+      Math.round(
+        MAGIC_BASE +
+          (attributes.soulPower / MAGIC_SOUL_POWER_DIVISOR) * level +
+          (level - 1) * MAGIC_FLAT_PER_REALM_LEVEL,
+      ) + (input.artifactMagic ?? 0),
     defense:
-      Math.floor(attributes.physique * DEFENSE_PER_PHYSIQUE + (input.armorDefense ?? 0)) +
-      (input.defenseFlat ?? 0),
+      Math.floor(
+        DEFENSE_BASE +
+          (attributes.physique / DEFENSE_PHYSIQUE_DIVISOR) * level +
+          (level - 1) * DEFENSE_FLAT_PER_REALM_LEVEL,
+      ) + (input.defenseFlat ?? 0),
     firstStrike:
       attributes.agility + (input.firstStrikeFlat ?? 0) + (input.firstStrikeModifier ?? 0),
-    critRate: Math.min(MAX_CRIT_RATE, BASE_CRIT_RATE + (input.critFlat ?? 0)),
+    critRate: Math.min(
+      MAX_CRIT_RATE,
+      BASE_CRIT_RATE +
+        Math.round(attributes.comprehension / CRIT_COMPREHENSION_DIVISOR) +
+        (input.critFlat ?? 0),
+    ),
     lifestealPct: input.lifestealPct ?? 0,
     statusResistPct: Math.min(100, input.statusResistPct ?? 0),
   };
@@ -95,8 +117,6 @@ export type CombatAttributeBreakdown = {
   base: DiscipleAttributes;
   talentFlat: DiscipleAttributes;
   artFlat: Partial<DiscipleAttributes>;
-  /** 装备五维平加（饰品档位）。 */
-  gearFlat: DiscipleAttributes;
   /** clamp(1, 100) 后的有效五维；派生公式一律取有效值。 */
   effective: DiscipleAttributes;
 };
@@ -114,7 +134,7 @@ function clampAttribute(value: number): number {
   return Math.min(100, Math.max(1, value));
 }
 
-/** 弟子快照 → 战斗属性视图：聚合天赋/功法/装备平加后走唯一公式。 */
+/** 弟子快照 → 战斗属性视图：聚合天赋/功法/法宝平加后走唯一公式。 */
 export function buildCombatProfile(
   disciple: Disciple,
   options: CombatProfileOptions = {},
@@ -125,23 +145,10 @@ export function buildCombatProfile(
   const artDefenseFlat = art?.effect.defenseFlat ?? 0;
   const gear = gearCombatInput(disciple.equippedGear);
 
-  const gearFlat: DiscipleAttributes = {
-    strength: 0,
-    soulPower: 0,
-    agility: 0,
-    physique: 0,
-    comprehension: 0,
-  };
-  if (gear.attributeFlat !== 0) {
-    for (const key of ATTRIBUTE_KEYS) gearFlat[key] = gear.attributeFlat;
-  }
-
   const base = { ...disciple.attributes };
   const effective = {} as DiscipleAttributes;
   for (const key of ATTRIBUTE_KEYS) {
-    effective[key] = clampAttribute(
-      base[key] + talentFlat[key] + (artFlat[key] ?? 0) + gearFlat[key],
-    );
+    effective[key] = clampAttribute(base[key] + talentFlat[key] + (artFlat[key] ?? 0));
   }
 
   let talentFirstStrikeFlat = 0;
@@ -160,8 +167,6 @@ export function buildCombatProfile(
   const profile = deriveCombatProfile({
     realmLevel: disciple.realmLevel,
     attributes: effective,
-    weaponAttack: gear.attackFlat,
-    armorDefense: gear.defenseFlat,
     artifactMagic: gear.spellPowerFlat,
     firstStrikeFlat: talentFirstStrikeFlat,
     firstStrikeModifier: options.speedModifier ?? 0,
@@ -173,7 +178,7 @@ export function buildCombatProfile(
   return {
     ...profile,
     breakdown: {
-      attributes: { base, talentFlat, artFlat, gearFlat, effective },
+      attributes: { base, talentFlat, artFlat, effective },
       gear,
       artDefenseFlat,
       talentFirstStrikeFlat,

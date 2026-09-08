@@ -11,7 +11,6 @@ export const SECT_RANK_RULES = {
 export type SectRank = keyof typeof SECT_RANK_RULES;
 
 export const OUTER_INCOME_PER_DISCIPLE = 2;
-export const DEVELOP_POLICY_EXTRA_INCOME_PER_OUTER = 1;
 export const INNER_SALARY_PER_DISCIPLE = 10;
 export const RECRUIT_COST = 300;
 export const RECRUIT_CANDIDATE_COUNT = 3;
@@ -19,7 +18,8 @@ export const INITIAL_SPIRIT_STONES = 2000;
 export const INITIAL_MORALE = 70;
 export const INITIAL_PRESTIGE = 50;
 export const INITIAL_INNER_DISCIPLES = 3;
-export const INITIAL_OUTER_DISCIPLES = 20;
+// 外门弟子只是数字、不入个体名册：外门总数恒等于当前宗门等级的外门上限（1/2/3 级 = 100/300/500），
+// 开局即满员、升阶即扩容；在岗（丹房/器坊/挖矿/练气）之外的人数一律按供奉计。
 
 export type SectUpgradeRequirement = {
   cost: number;
@@ -56,15 +56,13 @@ export function sectUpgradeFailureReason(state: GameState): string | undefined {
   if (state.spiritStones < requirement.cost) return "insufficient_resource";
   const minRealmLevel = requirement.minRealmLevel;
   if (minRealmLevel !== undefined) {
-    const reached = state.disciples.some(
-      (disciple) => disciple.role === "inner" && disciple.realmLevel >= minRealmLevel,
-    );
+    const reached = state.disciples.some((disciple) => disciple.realmLevel >= minRealmLevel);
     if (!reached) return "sect_upgrade_realm_not_met";
   }
   const goldenCoreCount = requirement.goldenCoreCount;
   if (goldenCoreCount !== undefined) {
     const count = state.disciples.filter(
-      (disciple) => disciple.role === "inner" && disciple.realmLevel >= realmStageForLevel(7).level,
+      (disciple) => disciple.realmLevel >= realmStageForLevel(7).level,
     ).length;
     if (count < goldenCoreCount) return "sect_upgrade_golden_core_not_met";
   }

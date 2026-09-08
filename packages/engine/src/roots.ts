@@ -3,10 +3,10 @@ import { deterministicRoll, sha256 } from "./hash.js";
 
 export const ROOT_MULTIPLIERS = {
   five: 1,
-  four: 1.5,
-  three: 2,
-  dual: 3,
-  single: 5,
+  four: 1.2,
+  three: 1.5,
+  dual: 2,
+  single: 3,
 } as const;
 
 export type RootType = keyof typeof ROOT_MULTIPLIERS;

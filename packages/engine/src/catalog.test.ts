@@ -4,8 +4,8 @@ import { generateDiscipleAttributes } from "./attributes.js";
 import {
   FORGE_TIER_LIMIT_BY_RANK,
   GEAR_CATALOG,
-  GEAR_CRAFT_COST,
   GEAR_CRAFT_POINTS,
+  GEAR_SLOT_KEYS,
   GEAR_TIERS,
   type GearSlot,
   type GearStats,
@@ -31,9 +31,9 @@ import {
 } from "./catalog.js";
 import { effectiveDeathAge, generateDiscipleMaxLifespan } from "./lifespan.js";
 import {
-  REALM_LIFESPAN_BONUSES,
+  MAJOR_REALM_LIFESPAN_INCREASES,
   REALM_STAGES,
-  realmLifespanBonusForLevel,
+  lifespanIncreaseForRealmLevel,
   realmStageForLevel,
 } from "./realms.js";
 import { ROOT_ELEMENTS, ROOT_MULTIPLIERS, generateRootProfile } from "./roots.js";
@@ -60,13 +60,39 @@ describe("境界表", () => {
     assert.equal(realmStageForLevel(10).realm, "nascent_soul_early");
   });
 
-  it("境界寿元加成档位", () => {
-    assert.equal(realmLifespanBonusForLevel(1), 0);
-    assert.equal(realmLifespanBonusForLevel(3), 0);
-    assert.equal(realmLifespanBonusForLevel(4), 200);
-    assert.equal(realmLifespanBonusForLevel(7), 700);
-    assert.equal(realmLifespanBonusForLevel(10), 2200);
-    assert.equal(REALM_LIFESPAN_BONUSES.length, 4);
+  it("真元需求与基础成功率锁定调平值（顶点为 ∞/0）", () => {
+    assert.deepEqual(
+      REALM_STAGES.map((stage) => stage.requiredZhenyuan),
+      [
+        1_000,
+        3_000,
+        5_000,
+        10_000,
+        30_000,
+        50_000,
+        100_000,
+        300_000,
+        500_000,
+        Number.POSITIVE_INFINITY,
+      ],
+    );
+    assert.deepEqual(
+      REALM_STAGES.map((stage) => stage.baseSuccessRate),
+      [50, 40, 30, 40, 30, 20, 25, 20, 10, 0],
+    );
+  });
+
+  it("大境界突破寿元档位：练气→筑基 +200 / 筑基→金丹 +500 / 金丹→元婴 +1000", () => {
+    assert.equal(lifespanIncreaseForRealmLevel(3), 0);
+    assert.equal(lifespanIncreaseForRealmLevel(4), 200);
+    assert.equal(lifespanIncreaseForRealmLevel(6), 0);
+    assert.equal(lifespanIncreaseForRealmLevel(7), 500);
+    assert.equal(lifespanIncreaseForRealmLevel(9), 0);
+    assert.equal(lifespanIncreaseForRealmLevel(10), 1_000);
+    assert.deepEqual(
+      MAJOR_REALM_LIFESPAN_INCREASES.map((milestone) => milestone.increase),
+      [200, 500, 1_000],
+    );
   });
 });
 
@@ -108,8 +134,8 @@ describe("灵根", () => {
     }
   });
 
-  it("倍率表与主仓一致", () => {
-    assert.deepEqual(ROOT_MULTIPLIERS, { five: 1, four: 1.5, three: 2, dual: 3, single: 5 });
+  it("倍率表与调平基准一致", () => {
+    assert.deepEqual(ROOT_MULTIPLIERS, { five: 1, four: 1.2, three: 1.5, dual: 2, single: 3 });
   });
 });
 
@@ -123,9 +149,9 @@ describe("寿命", () => {
     }
   });
 
-  it("有效坐化年龄 = 基准 + 境界加成 + 平加", () => {
+  it("有效坐化年龄 = maxLifespan（已含突破寿元） + 平加", () => {
     const deathAge = effectiveDeathAge({ age: 80, maxLifespan: 90, realmLevel: 7 }, 10);
-    assert.equal(deathAge, 90 + 700 + 10);
+    assert.equal(deathAge, 90 + 10);
   });
 });
 
@@ -302,27 +328,9 @@ describe("法术目录（12 门主动战技）", () => {
   });
 });
 
-describe("装备系统（4 槽 × 4 档固定数值）", () => {
+describe("装备系统（法宝 × 4 档固定数值）", () => {
   it("全表数值逐字对齐设计表", () => {
     const expected: Record<GearSlot, Record<GearTier, GearStats>> = {
-      weapon: {
-        1: { attackFlat: 10 },
-        2: { attackFlat: 25 },
-        3: { attackFlat: 45 },
-        4: { attackFlat: 70 },
-      },
-      armor: {
-        1: { defenseFlat: 10 },
-        2: { defenseFlat: 25 },
-        3: { defenseFlat: 45 },
-        4: { defenseFlat: 70 },
-      },
-      accessory: {
-        1: { attributeFlat: 2 },
-        2: { attributeFlat: 4 },
-        3: { attributeFlat: 6 },
-        4: { attributeFlat: 9 },
-      },
       talisman: {
         1: { spellPowerFlat: 8 },
         2: { spellPowerFlat: 14 },
@@ -331,11 +339,11 @@ describe("装备系统（4 槽 × 4 档固定数值）", () => {
       },
     };
     assert.deepEqual(GEAR_CATALOG, expected);
+    assert.deepEqual([...GEAR_SLOT_KEYS], ["talisman"]);
   });
 
-  it("器坊点数 20/60/150/300、费用 200/600/1500/3000", () => {
+  it("器坊点数 20/60/150/300（费用改按外门月耗逐月结算）", () => {
     assert.deepEqual(GEAR_CRAFT_POINTS, { 1: 20, 2: 60, 3: 150, 4: 300 });
-    assert.deepEqual(GEAR_CRAFT_COST, { 1: 200, 2: 600, 3: 1500, 4: 3000 });
     assert.deepEqual([...GEAR_TIERS], [1, 2, 3, 4]);
   });
 
@@ -343,21 +351,10 @@ describe("装备系统（4 槽 × 4 档固定数值）", () => {
     assert.deepEqual(FORGE_TIER_LIMIT_BY_RANK, { 1: 2, 2: 3, 3: 4 });
   });
 
-  it("装备战力输入接口：四槽合计平加", () => {
-    assert.deepEqual(getGear("weapon", 1), { attackFlat: 10 });
-    assert.deepEqual(getGear("accessory", 4), { attributeFlat: 9 });
-    assert.deepEqual(gearCombatInput(undefined), {
-      attackFlat: 0,
-      defenseFlat: 0,
-      attributeFlat: 0,
-      spellPowerFlat: 0,
-    });
-    assert.deepEqual(gearCombatInput({ weapon: 1, armor: 2, accessory: 3, talisman: 4 }), {
-      attackFlat: 10,
-      defenseFlat: 25,
-      attributeFlat: 6,
-      spellPowerFlat: 32,
-    });
+  it("装备战力输入接口：法宝法威平加", () => {
+    assert.deepEqual(getGear("talisman", 1), { spellPowerFlat: 8 });
+    assert.deepEqual(gearCombatInput(undefined), { spellPowerFlat: 0 });
+    assert.deepEqual(gearCombatInput({ talisman: 4 }), { spellPowerFlat: 32 });
   });
 });
 
@@ -370,19 +367,13 @@ describe("丹药系统（2 种，丹房）", () => {
     );
   });
 
-  it("延寿丹：40 点 / 500 灵石 / 2 月 / 最大寿命 +10 年", () => {
+  it("延寿丹：最大寿命 +10 年（炼制点数统一 30，与丹方无关）", () => {
     const pill = pillByName("延寿丹");
-    assert.equal(pill.craftPoints, 40);
-    assert.equal(pill.craftCost, 500);
-    assert.equal(pill.craftMonths, 2);
     assert.equal(pill.effect.lifespanFlat, 10);
   });
 
-  it("聚灵丹：20 点 / 300 灵石 / 1 月 / 12 月真元 ×1.5 不叠加刷新", () => {
+  it("聚灵丹：12 月真元 ×1.5 不叠加刷新", () => {
     const pill = pillByName("聚灵丹");
-    assert.equal(pill.craftPoints, 20);
-    assert.equal(pill.craftCost, 300);
-    assert.equal(pill.craftMonths, 1);
     assert.deepEqual(pill.effect.zhenyuanBuff, { multiplier: 1.5, months: 12, stacks: false });
   });
 
@@ -420,7 +411,6 @@ function discipleFixture(overrides: Partial<Disciple> & Pick<Disciple, "id">): D
     realmLevel,
     zhenyuan: 0,
     breakthroughFailures: 0,
-    role: overrides.role ?? "inner",
     rootType: "single",
     rootElements: ["metal"],
     attributes: { strength: 50, soulPower: 50, agility: 50, physique: 50, comprehension: 50 },

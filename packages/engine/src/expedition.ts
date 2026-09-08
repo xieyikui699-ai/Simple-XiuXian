@@ -1,5 +1,5 @@
 import { type BattleFighter, type BattleReport, runBattle } from "./battle.js";
-// 历练与遭遇（设计文档 §历练与遭遇 D-014 / §声望 D-019）：外出历练方针的宗门级月掷结算。
+// 历练与遭遇（设计文档 §历练与遭遇 D-014 / §声望 D-019）：每月自动进行的宗门级月掷结算。
 // 纯函数：不修改输入状态，返回 ExpeditionReport 由月结第 5 步落账（settlement.ts，E03-F02）；
 // 对手弟子与出战弟子均由调用方注入（opponentProvider / fighterProvider），本模块不依赖 NPC 实装。
 // 事件掷骰契约（与 expedition.test.ts golden 对拍，sha256 独立预计算）：
@@ -146,9 +146,7 @@ export function combatReadyDisciples(state: Readonly<GameState>, turn: number): 
   if (state.elders?.war) occupied.add(state.elders.war);
   return state.disciples.filter(
     (disciple) =>
-      disciple.role === "inner" &&
-      !occupied.has(disciple.id) &&
-      !(disciple.injury && disciple.injury.untilTurn >= turn),
+      !occupied.has(disciple.id) && !(disciple.injury && disciple.injury.untilTurn >= turn),
   );
 }
 

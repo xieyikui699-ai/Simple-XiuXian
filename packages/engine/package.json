@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "pnpm build && node --test dist/hash.test.js dist/naming.test.js dist/catalog.test.js dist/production.test.js dist/battle.test.js dist/combat.test.js dist/rival.test.js dist/expedition.test.js dist/engine.test.js dist/campaign.test.js",
+    "test": "pnpm build && node --test dist/hash.test.js dist/naming.test.js dist/catalog.test.js dist/production.test.js dist/battle.test.js dist/combat.test.js dist/rival.test.js dist/outer-jobs.test.js dist/expedition.test.js dist/engine.test.js dist/campaign.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }

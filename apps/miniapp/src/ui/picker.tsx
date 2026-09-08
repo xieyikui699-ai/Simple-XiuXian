@@ -2,6 +2,7 @@
 import { realmStageForLevel } from "@simple-xiuxian/engine";
 import type { Disciple } from "@simple-xiuxian/engine";
 import { Text, View } from "@tarojs/components";
+import { formatZhenyuanRequirement } from "./display";
 import "./picker.css";
 
 export type DisciplePickerProps = {
@@ -36,12 +37,11 @@ export function DisciplePicker({
             }}
           >
             <Text>
-              {disciple.name} · {realmStageForLevel(disciple.realmLevel).name} Lv.
-              {disciple.realmLevel}
+              {disciple.name} · {realmStageForLevel(disciple.realmLevel).name}
             </Text>
             <Text className="muted">
               {reason ||
-                `真元 ${disciple.zhenyuan}/${realmStageForLevel(disciple.realmLevel).requiredZhenyuan}`}
+                `真元 ${disciple.zhenyuan}/${formatZhenyuanRequirement(realmStageForLevel(disciple.realmLevel).requiredZhenyuan)}`}
             </Text>
           </View>
         );

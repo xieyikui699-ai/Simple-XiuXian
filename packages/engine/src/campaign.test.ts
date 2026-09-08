@@ -1,15 +1,14 @@
 // E04 收口验证（T-E04-F01～F04）：两宗对抗全链路集成测试。
 // 覆盖 P4 约束的确定性双跑断言（60 月两宗状态 deepEqual）、宣战-会战-冷却链路、
-// 四结局与评级、大境界突破声望 +3、终局锁语义。全链路均为纯函数确定性推进。
+// 三结局与评级、大境界突破声望 +3、终局锁语义。全链路均为纯函数确定性推进。
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createGame, setWarParty } from "./engine.js";
-import { realmStageForLevel } from "./realms.js";
 import { createRivalSect, declareWar, prestigeDeltaForMajorBreakthrough } from "./rival.js";
 import { rateEnding, settleMonthly } from "./settlement.js";
 import type { GameState } from "./state.js";
 
-/** 剧本推进：每月历练；可宣战即宣战（连续覆盖会战链路）。 */
+/** 剧本推进：每月自动历练；可宣战即宣战（连续覆盖会战链路）。 */
 function runCampaign(seed: string, months: number): GameState {
   let state = createGame({ seed, sectName: "青云门", rivalName: "玄阴宗" });
   for (let i = 0; i < months; i++) {
@@ -22,7 +21,7 @@ function runCampaign(seed: string, months: number): GameState {
     ) {
       state = declareWar(state);
     }
-    state = settleMonthly(state, "explore").state;
+    state = settleMonthly(state).state;
   }
   return state;
 }
@@ -59,17 +58,18 @@ describe("E04 两宗对抗全链路（campaign）", () => {
     for (const record of wars) {
       assert.ok(record.plunder >= 0);
       assert.ok(["player", "rival"].includes(record.winner));
-      assert.equal(record.pairOutcomes.length, 3);
+      // 各派 3 名、不足 3 人按实有数（连续会战后伤员多时合法地只有 2 场配对）。
+      assert.ok(record.pairOutcomes.length >= 2 && record.pairOutcomes.length <= 3);
       assert.ok(record.summary.length > 0);
     }
   });
 
-  it("宣战次月触发会战：当月不开战、次月第 7 步结算并进入 12 月冷却；冷却期内拒绝宣战", () => {
+  it("宣战次月触发会战：当月不开战、次月第 6 步结算并进入 12 月冷却；冷却期内拒绝宣战", () => {
     let state = createGame({ seed: "war-flow", sectName: "青云门", rivalName: "玄阴宗" });
     state = declareWar(state);
     assert.equal(state.warWithRival, true);
     assert.equal(state.warDeclaredTurn, 1);
-    const first = settleMonthly(state, "rest");
+    const first = settleMonthly(state);
     assert.ok(first.result.war, "宣战次月应结算会战");
     assert.equal(first.state.warWithRival, false);
     assert.equal(first.state.warCooldownEndsTurn, 13);
@@ -89,51 +89,43 @@ describe("E04 两宗对抗全链路（campaign）", () => {
     assert.throws(() => setWarParty(injured, ["d-3"]), /war_party_disciple_unavailable/);
   });
 
-  it("大境界突破声望 +3（进入 4/7/10 级），其余等级为 0；飞升结局带评级字段", () => {
+  it("大境界突破声望 +3（进入 4/7/10 级），其余等级为 0", () => {
     assert.equal(prestigeDeltaForMajorBreakthrough(4), 3);
-    const state = createGame({ seed: "ascend-seed", sectName: "青云门", rivalName: "玄阴宗" });
-    const disciple = state.disciples.find((entry) => entry.id === "d-1");
-    assert.ok(disciple);
-    disciple.realmLevel = 10;
-    disciple.realm = realmStageForLevel(10).realm;
-    disciple.zhenyuan = realmStageForLevel(10).requiredZhenyuan;
-    disciple.breakthroughFailures = 20;
-    const { state: after } = settleMonthly(state, "rest");
-    assert.equal(after.ending?.kind, "ascension");
-    assert.ok(after.ending?.rating);
-    assert.ok(["甲", "乙", "丙", "丁"].includes(after.ending.rating ?? ""));
-    assert.equal(typeof after.ending?.score, "number");
-    assert.equal(after.totalBreakthroughs, 1);
-    assert.throws(() => settleMonthly(after, "rest"), /game_already_ended/);
+    assert.equal(prestigeDeltaForMajorBreakthrough(7), 3);
+    assert.equal(prestigeDeltaForMajorBreakthrough(10), 3);
+    assert.equal(prestigeDeltaForMajorBreakthrough(5), 0);
   });
 
-  it("四结局判定与评级：吞并/被吞并对称、凋敝连续 6 月、评级阈值确定", () => {
+  it("三结局判定与评级：吞并/被吞并对称、凋敝连续 6 月、评级阈值确定", () => {
     // 吞并：对方声望 0 且我方等级更高 → 次月月结触发。
     const state = createGame({ seed: "annex-seed", sectName: "青云门", rivalName: "玄阴宗" });
     const rival = state.rival;
     assert.ok(rival);
     rival.prestige = 0;
     state.sectRank = 2;
-    const annexed = settleMonthly(state, "rest");
+    const annexed = settleMonthly(state);
     assert.equal(annexed.state.ending?.kind, "annexation");
     assert.ok(annexed.state.ending?.rating);
+    assert.ok(["甲", "乙", "丙", "丁"].includes(annexed.state.ending.rating ?? ""));
+    assert.equal(typeof annexed.state.ending?.score, "number");
+    assert.throws(() => settleMonthly(annexed.state), /game_already_ended/);
     // 被吞并：对称。
     const lost = createGame({ seed: "annexed-seed", sectName: "青云门", rivalName: "玄阴宗" });
     const strongRival = lost.rival;
     assert.ok(strongRival);
     lost.prestige = 0;
     strongRival.sectRank = 2;
-    const annexedMe = settleMonthly(lost, "rest");
+    const annexedMe = settleMonthly(lost);
     assert.equal(annexedMe.state.ending?.kind, "annexed");
-    // 凋敝：内门 0 且灵石 < 300 连续 6 月（计数器落 state）。清空弟子使灵石无供奉回血。
+    // 凋敝：内门 0 且灵石不足招募费连续 6 月（计数器落 state；连续累积逻辑已由
+    // rival.test.ts 单测覆盖）。此处置计数 5 再推一月即触发终局；灵石归零保证
+    // 即使历练收获也不足招募费。
     let declining = createGame({ seed: "decline-seed", sectName: "青云门", rivalName: "玄阴宗" });
     declining.disciples = [];
-    declining.spiritStones = 100;
-    for (let i = 0; i < 6; i++) {
-      const outcome = settleMonthly(declining, "rest");
-      declining = outcome.state;
-      if (declining.ending) break;
-    }
+    declining.spiritStones = 0;
+    declining.bankruptStreak = 5;
+    const outcome = settleMonthly(declining);
+    declining = outcome.state;
     assert.equal(declining.ending?.kind, "bankrupt");
     assert.ok(declining.ending?.rating);
     // 评级确定性。

@@ -1,16 +1,15 @@
-// 月度结算（设计文档 §月结流程 9 步顺序锚点 MONTHLY_STEP_ORDER）：
-// ① 灵石结转（供奉/俸禄/危机判定，资源长老供奉 +20%）
-// ② 方针效果（闭关/经营/历练/休养；休养兼作伤势恢复 −2 月）
-// ③ 真元增长与突破判定（功法/聚灵丹/养气诀/战备长老增益接线；岗位占用者不修炼）
-// ④ 丹房/器坊点数与出炉（production.advanceWorkshops；旧档未启用生产时跳过以保持缺省口径）
-// ⑤ 历练与遭遇事件（方针=外出历练时 settleExpedition；报告落账：灵石/声望/士气/纪事/伤势/掉落/战报）
-// ⑥ NPC 宗门推进（E04-F02 接线：advanceRivalSectMonthly 同帧推进 + NPC 宣战判定）
-// ⑦ 会战结算（E04-F03/F04 接线：宣战次月 runSectWar）
-// ⑧ 声望/士气落地与胜负判定（E04-F04：吞并/被吞并/凋敝终局 + 仙途评级）
-// ⑨ 第 12 月：年度衰老与坐化（长老随坐化自动卸任）
+// 月度结算（设计文档 §月结流程 8 步顺序锚点 MONTHLY_STEP_ORDER）：
+// ① 灵石结转（供奉/俸禄/危机判定，资源长老供奉 +20%；外门总数恒等于宗门等级上限）
+// ② 真元增长与突破判定（功法/聚灵丹/养气诀/战备长老增益接线；岗位占用者不修炼）
+// ③ 丹房/器坊点数与出炉（production.advanceWorkshops；旧档未启用生产时跳过以保持缺省口径）
+// ④ 历练与遭遇事件（每月自动进行 settleExpedition；报告落账：灵石/声望/士气/纪事/伤势/掉落/战报）
+// ⑤ NPC 宗门推进（E04-F02 接线：advanceRivalSectMonthly 同帧推进 + NPC 宣战判定）
+// ⑥ 会战结算（E04-F03/F04 接线：宣战次月 runSectWar）
+// ⑦ 声望/士气落地与胜负判定（E04-F04：吞并/被吞并/凋敝终局 + 仙途评级）
+// ⑧ 第 12 月：年度衰老与坐化（长老随坐化自动卸任）
 // 纯函数：输入 GameState 返回新 GameState（内部 structuredClone），同输入恒同输出。
 import type { BattleReport } from "./battle.js";
-import { getTechniqueById } from "./catalog.js";
+import { MAX_SPELLS_PER_DISCIPLE, SPELLS, type Spell, getTechniqueById } from "./catalog.js";
 import { buildCombatProfile } from "./combat-profile.js";
 import {
   type ExpeditionReport,
@@ -18,10 +17,21 @@ import {
   type OpponentProvider,
   settleExpedition,
 } from "./expedition.js";
+import { generateDisciple } from "./generation.js";
 import { deterministicRoll } from "./hash.js";
 import { effectiveDeathAge } from "./lifespan.js";
+import {
+  OUTER_MINING_STONES_PER_MONTH,
+  OUTER_QI_ZHENYUAN_PER_WORKER,
+  effectiveOuterJobsOf,
+} from "./outer-jobs.js";
 import { advanceWorkshops } from "./production.js";
-import { nextRealmStage, realmLifespanBonusForLevel, realmStageForLevel } from "./realms.js";
+import {
+  TOP_REALM_LEVEL,
+  lifespanIncreaseForRealmLevel,
+  nextRealmStage,
+  realmStageForLevel,
+} from "./realms.js";
 import {
   WAR_COOLDOWN_MONTHS,
   advanceRivalSectMonthly,
@@ -44,10 +54,10 @@ import {
   selectSectWarFighters,
 } from "./sect-war.js";
 import {
-  DEVELOP_POLICY_EXTRA_INCOME_PER_OUTER,
   INNER_SALARY_PER_DISCIPLE,
   OUTER_INCOME_PER_DISCIPLE,
   RECRUIT_COST,
+  sectLimitsFor,
 } from "./sect.js";
 import type {
   BreakthroughEvent,
@@ -57,11 +67,10 @@ import type {
   EndingKind,
   EndingRating,
   GameState,
-  MonthlyPolicy,
   PromotionEvent,
   SettlementResult,
 } from "./state.js";
-import { CRAFT_JOB_KINDS, POLICY_DISPLAY_NAMES } from "./state.js";
+import { CRAFT_JOB_KINDS } from "./state.js";
 import { talentById } from "./talents.js";
 import { talentsBreakthroughFlat, talentsLifespanFlat, talentsZhenyuanPct } from "./talents.js";
 
@@ -69,10 +78,8 @@ export const MORALE_HIGH_THRESHOLD = 70;
 export const MORALE_LOW_THRESHOLD = 30;
 export const MORALE_HIGH_ZHENYUAN_PCT = 0.1;
 export const MORALE_LOW_ZHENYUAN_PCT = -0.1;
-export const CULTIVATE_POLICY_ZHENYUAN_PCT = 0.3;
-export const CULTIVATE_POLICY_SPIRIT_COST = 15;
-export const EXPLORE_POLICY_SPIRIT_COST = 15;
-export const REST_POLICY_MORALE_DELTA = 5;
+/** 基线士气：无事月 +1（会战/坐化/危机/切磋另计）。 */
+export const BASE_MORALE_DELTA = 1;
 export const CRISIS_MORALE_PENALTY = 3;
 export const DEATH_MORALE_PENALTY = 5;
 export const BREAKTHROUGH_FAILURE_RATE_BONUS = 5;
@@ -82,11 +89,11 @@ export const CHRONICLE_LIMIT = 500;
 export const RESOURCE_ELDER_OFFERING_PCT = 0.2;
 /** 战备长老：全门突破成功率 +3（百分点）。 */
 export const WAR_ELDER_BREAKTHROUGH_FLAT = 3;
-/** 休养方针：所有伤势恢复月数 −2（设计 §伤势）。 */
-export const REST_POLICY_INJURY_RECOVERY_MONTHS = 2;
+/** 突破顿悟概率：弟子突破成功时直接领悟一门未修法术的概率（百分点，不经藏经阁）。 */
+export const EPIPHANY_CHANCE_PCT = 20;
 /** 战报存档条数上限（最新在前；控制快照体积）。 */
 export const BATTLE_LOG_LIMIT = 30;
-/** 战报存档字节预算：序列化总量超预算时丢弃更旧战报（快照 <100KB 约束，设计 D-022）。 */
+/** 战报存档字节预算：序列化总量超预算时丢弃更旧战报（快照 <128KB 约束，设计 D-022）。 */
 export const BATTLE_LOG_BYTE_BUDGET = 45_000;
 
 /**
@@ -106,10 +113,9 @@ export function prependBattleReports(state: GameState, reports: readonly BattleR
   state.battles = kept;
 }
 
-/** 月结 9 步顺序锚点（T-E00-F04-001 golden 契约）：经济→方针→真元突破→生产→历练→NPC→会战→声望胜负→年度衰老。 */
+/** 月结 8 步顺序锚点（golden 契约）：经济→真元突破→生产→历练→NPC→会战→声望胜负→年度衰老。 */
 export const MONTHLY_STEP_ORDER: readonly string[] = [
   "economy",
-  "policy",
   "breakthrough",
   "production",
   "expedition",
@@ -143,12 +149,11 @@ export function monthlyZhenyuanGain(state: GameState, disciple: Disciple): numbe
       : state.morale <= MORALE_LOW_THRESHOLD
         ? MORALE_LOW_ZHENYUAN_PCT
         : 0;
-  const policyPct = state.policy === "cultivate" ? CULTIVATE_POLICY_ZHENYUAN_PCT : 0;
   const techniquePct = disciple.techniqueId
     ? (getTechniqueById(disciple.techniqueId)?.effect.zhenyuanPct ?? 0)
     : 0;
   const base = ZHENYUAN_BASE + comprehension * ZHENYUAN_COMPREHENSION_COEFF;
-  const rate = 1 + talentsZhenyuanPct(disciple.talentIds) + techniquePct + moralePct + policyPct;
+  const rate = 1 + talentsZhenyuanPct(disciple.talentIds) + techniquePct + moralePct;
   const gain = Math.round(base * ROOT_MULTIPLIERS[disciple.rootType] * rate);
   const focusUntil = disciple.spiritFocusUntilTurn;
   // 聚灵丹：持续期内真元获取 ×1.5（不叠加、重复服用刷新时长）。
@@ -281,13 +286,11 @@ export type SettleMonthlyOutcome = {
 
 export function settleMonthly(
   stateInput: Readonly<GameState>,
-  policy: MonthlyPolicy,
   options: SettleMonthlyOptions = {},
 ): SettleMonthlyOutcome {
   if (stateInput.ending) throw new Error("game_already_ended");
   let state = structuredClone(stateInput) as GameState;
   state.currentTurn += 1;
-  state.policy = policy;
   const turn = state.currentTurn;
 
   const breakthroughs: BreakthroughEvent[] = [];
@@ -297,62 +300,44 @@ export function settleMonthly(
   let moraleDelta = 0;
   let prestigeDelta = 0;
 
-  // ① 灵石结转：外门供奉（资源长老 +20%）+ 经营方针额外供奉 − 内门俸禄。
-  const outerCount = state.disciples.filter((disciple) => disciple.role === "outer").length;
-  const innerCount = state.disciples.filter((disciple) => disciple.role === "inner").length;
+  // ① 灵石结转：外门供奉（资源长老 +20%，外门总数恒等于宗门等级上限）+ 挖矿上缴 − 内门俸禄。
+  const outerCount = sectLimitsFor(state.sectRank).outerLimit;
+  const innerCount = state.disciples.length;
   const offeringMultiplier = state.elders?.resource ? 1 + RESOURCE_ELDER_OFFERING_PCT : 1;
-  let income = Math.round(outerCount * OUTER_INCOME_PER_DISCIPLE * offeringMultiplier);
-  if (policy === "develop") income += outerCount * DEVELOP_POLICY_EXTRA_INCOME_PER_OUTER;
+  const income =
+    Math.round(outerCount * OUTER_INCOME_PER_DISCIPLE * offeringMultiplier) +
+    effectiveOuterJobsOf(state).mining * OUTER_MINING_STONES_PER_MONTH;
   const expenses = innerCount * INNER_SALARY_PER_DISCIPLE;
   let crisis = false;
 
-  // ① 资源危机：付不起俸禄时方针未执行、成本勾销、全门士气受挫。
-  const policyCost =
-    policy === "cultivate" || policy === "explore"
-      ? policy === "cultivate"
-        ? CULTIVATE_POLICY_SPIRIT_COST
-        : EXPLORE_POLICY_SPIRIT_COST
-      : 0;
-  if (state.spiritStones + income - expenses - policyCost < 0) {
+  // ① 资源危机：付不起俸禄时当月停摆、收支勾销、全门士气受挫。
+  if (state.spiritStones + income - expenses < 0) {
     crisis = true;
     moraleDelta -= CRISIS_MORALE_PENALTY;
     appendChronicle(state, {
       turn,
       kind: "warning",
-      text: `宗门灵石见底，本月「${POLICY_DISPLAY_NAMES[policy]}」未能执行，俸禄一笔勾销，弟子人心浮动。`,
+      text: "宗门灵石见底，本月俸禄无法支付、历练停摆，弟子人心浮动。",
     });
   } else {
-    spiritStonesDelta += income - expenses - policyCost;
-    state.spiritStones += income - expenses - policyCost;
-
-    // ② 方针效果（历练的遭遇事件在第 ⑤ 步触发）。
-    if (policy === "rest") {
-      moraleDelta += REST_POLICY_MORALE_DELTA;
-      // 休养生息：所有伤势恢复月数 −2（不超过当月，次月起可出战）。
-      for (const disciple of state.disciples) {
-        if (!disciple.injury) continue;
-        disciple.injury = {
-          kind: disciple.injury.kind,
-          untilTurn: Math.max(turn, disciple.injury.untilTurn - REST_POLICY_INJURY_RECOVERY_MONTHS),
-        };
-      }
-    } else if (policy === "explore") {
-      moraleDelta -= 2;
-      prestigeDelta += 1;
-    } else {
-      moraleDelta += 1;
-    }
+    spiritStonesDelta += income - expenses;
+    state.spiritStones += income - expenses;
+    // 基线士气：无事月 +1（切磋/会战/坐化/危机另计）。
+    moraleDelta += BASE_MORALE_DELTA;
   }
 
   state.morale = Math.min(100, Math.max(0, state.morale + moraleDelta));
   state.prestige = Math.max(0, state.prestige + prestigeDelta);
 
-  // ③ 真元增长与突破判定（仅内门弟子修炼；岗位/长老占用者不修炼）。
+  // （外门自然流动已废除：外门恒按宗门等级上限满员，无来投/离去。）
+
+  // ② 真元增长与突破判定（名册全员内门；岗位/长老占用者不修炼）。
   const occupied = jobHolderIds(state);
   const warElderFlat = state.elders?.war ? WAR_ELDER_BREAKTHROUGH_FLAT : 0;
   for (const disciple of state.disciples) {
-    if (disciple.role !== "inner") continue;
     if (occupied.has(disciple.id)) continue;
+    // 元婴前期即修行尽头：圆满弟子不再积累真元、不再尝试突破。
+    if (disciple.realmLevel >= TOP_REALM_LEVEL) continue;
     disciple.zhenyuan += monthlyZhenyuanGain(state, disciple);
     const stage = realmStageForLevel(disciple.realmLevel);
     if (disciple.zhenyuan < stage.requiredZhenyuan) continue;
@@ -374,46 +359,55 @@ export function settleMonthly(
     }
     disciple.breakthroughFailures = 0;
     const next = nextRealmStage(disciple.realmLevel);
-    if (!next) {
-      // 元婴前期圆满再突破 → 飞升结局。
-      state.totalBreakthroughs = (state.totalBreakthroughs ?? 0) + 1;
-      appendChronicle(state, {
-        turn,
-        kind: "milestone",
-        text: `${disciple.name} 于元婴前期圆满，突破最后一道天堑，白日飞升而去！`,
-      });
-      state.ending = {
-        kind: "ascension",
-        turn,
-        text: `${state.sectName}门下 ${disciple.name} 飞升仙界，宗门就此名留仙史。`,
-      };
-      applyEndingEvaluation(state, turn);
-      breakthroughs.push({
-        discipleId: disciple.id,
-        discipleName: disciple.name,
-        outcome: "ascended",
-        fromRealmLevel: disciple.realmLevel,
-        successRate,
-      });
-      break;
-    }
-    const previousBonus = realmLifespanBonusForLevel(disciple.realmLevel);
+    if (!next) continue;
     disciple.realm = next.realm;
     disciple.realmLevel = next.level;
     state.totalBreakthroughs = (state.totalBreakthroughs ?? 0) + 1;
-    breakthroughs.push({
+
+    // 突破顿悟：突破成功有 EPIPHANY_CHANCE_PCT 概率灵光乍现，直接领悟一门未修法术
+    //（不经藏经阁、不耗书；弟子已修满 2 门则与此无缘）。
+    const knownSpells = disciple.spellIds ?? [];
+    let epiphany: Spell | undefined;
+    if (knownSpells.length < MAX_SPELLS_PER_DISCIPLE) {
+      const candidates = SPELLS.filter((spell) => !knownSpells.includes(spell.id));
+      if (
+        candidates.length > 0 &&
+        deterministicRoll(`${state.seed}:epiphany:${disciple.id}:${turn}`) < EPIPHANY_CHANCE_PCT
+      ) {
+        const pickRoll = deterministicRoll(`${state.seed}:epiphany:pick:${disciple.id}:${turn}`);
+        const picked = candidates[Math.floor((pickRoll / 100) * candidates.length)];
+        if (picked) {
+          epiphany = picked;
+          disciple.spellIds = [...knownSpells, picked.id];
+        }
+      }
+    }
+
+    const event: BreakthroughEvent = {
       discipleId: disciple.id,
       discipleName: disciple.name,
       outcome: "success",
       fromRealmLevel: stage.level,
       toRealmLevel: next.level,
       successRate,
-    });
+    };
+    if (epiphany) {
+      event.epiphanySpellId = epiphany.id;
+      event.epiphanySpellName = epiphany.name;
+    }
+    breakthroughs.push(event);
     appendChronicle(state, {
       turn,
       kind: "milestone",
       text: `${disciple.name} 突破至${next.name}！`,
     });
+    if (epiphany) {
+      appendChronicle(state, {
+        turn,
+        kind: "milestone",
+        text: `${disciple.name} 突破之际灵台清明，顿悟法术《${epiphany.name}》！`,
+      });
+    }
     // 大境界突破（进入 4/7/10 级）：声望 +3（设计 §声望）。
     const majorPrestige = prestigeDeltaForMajorBreakthrough(next.level);
     if (majorPrestige > 0) {
@@ -425,26 +419,29 @@ export function settleMonthly(
         text: `${disciple.name} 迈入大境界（实力等级 ${next.level}），宗门声望 +${majorPrestige}。`,
       });
     }
-    // 新境界寿元加成实时生效（差额累加）。
-    const bonusDelta = realmLifespanBonusForLevel(disciple.realmLevel) - previousBonus;
-    if (bonusDelta > 0) {
+    // 大境界突破寿元直接写入最大寿命：练气→筑基 +200 / 筑基→金丹 +500 / 金丹→元婴 +1000。
+    const lifespanIncrease = lifespanIncreaseForRealmLevel(next.level);
+    if (lifespanIncrease > 0) {
+      disciple.maxLifespan += lifespanIncrease;
       appendChronicle(state, {
         turn,
         kind: "normal",
-        text: `境界跃升，${disciple.name} 寿元大增（+${bonusDelta} 年）。`,
+        text: `境界跃升，${disciple.name} 寿元大增（+${lifespanIncrease} 年）。`,
       });
     }
   }
 
-  // ④ 丹房/器坊点数与出炉（旧档未启用生产时跳过，保持扩展字段缺省口径）。
-  // ⑤ 历练与遭遇事件（方针=外出历练且未危机时；资源危机月方针未执行故无遭遇）。
-  // 飞升当月终局已定（第 ③ 步），后续生产与历练不再执行。
+  // ③ 丹房/器坊点数与出炉（旧档未启用生产时跳过，保持扩展字段缺省口径；危机月随历练一并停摆）。
+  // ④ 历练与遭遇事件（每月自动进行；资源危机月停摆故无遭遇）。
+  // 终局只能由第 ⑦ 步落账；此后生产与历练不再执行（防御性判定）。
   let expeditionReport: ExpeditionReport | undefined;
+  let workshopsOutcome: ReturnType<typeof advanceWorkshops> | undefined;
   if (!state.ending) {
-    if (state.jobs) {
-      state = advanceWorkshops(state).state;
+    if (state.jobs && !crisis) {
+      workshopsOutcome = advanceWorkshops(state);
+      state = workshopsOutcome.state;
     }
-    if (policy === "explore" && !crisis) {
+    if (!crisis) {
       // 相遇接线（E04-F02）：缺省对手 = 真实 NPC 宗门确定性选将；宣战状态自 state 读取。
       const rival = state.rival;
       const opponentProvider: OpponentProvider =
@@ -486,7 +483,7 @@ export function settleMonthly(
     }
   }
 
-  // ⑥ NPC 宗门推进：与玩家月结同帧推进对手宗门（真元/突破/升阶/招募），并做 NPC 宣战判定。
+  // ⑤ NPC 宗门推进：与玩家月结同帧推进对手宗门（真元/突破/升阶），并做 NPC 宣战判定。
   let rivalDeclaredWar = false;
   let rivalRankUp: { from: number; to: number } | undefined;
   if (!state.ending && state.rival) {
@@ -520,7 +517,7 @@ export function settleMonthly(
     }
   }
 
-  // ⑦ 会战结算（宣战次月触发）：选将 → 同序配对逐场 1v1 → 裁决 → 掠夺/声望/士气/伤势落账。
+  // ⑥ 会战结算（宣战次月触发）：选将 → 同序配对逐场 1v1 → 裁决 → 掠夺/声望/士气/伤势落账。
   let warRecord: SectWarRecord | undefined;
   if (
     !state.ending &&
@@ -619,7 +616,7 @@ export function settleMonthly(
     warRecord = record;
   }
 
-  // ⑧ 声望/士气落地与胜负判定：声望/士气已随历练与会战落账；此处判吞并/被吞并/凋敝终局。
+  // ⑦ 声望/士气落地与胜负判定：声望/士气已随历练与会战落账；此处判吞并/被吞并/凋敝终局。
   if (!state.ending) {
     const rival = state.rival;
     if (
@@ -654,7 +651,7 @@ export function settleMonthly(
       // 凋敝：内门 0 且灵石不足招募费连续 6 月（计数器落 state）。
       state.bankruptStreak = declineStreakAfter({
         streak: state.bankruptStreak ?? 0,
-        innerCount: state.disciples.filter((disciple) => disciple.role === "inner").length,
+        innerCount: state.disciples.length,
         spiritStones: state.spiritStones,
       });
       if (isDeclineCollapse(state.bankruptStreak)) {
@@ -668,7 +665,7 @@ export function settleMonthly(
     }
   }
 
-  // ⑨ 第 12 月：年度衰老与坐化。
+  // ⑧ 第 12 月：年度衰老与坐化。
   if (turn % 12 === 0) {
     for (const disciple of state.disciples) disciple.age += 1;
     const deceased = state.disciples.filter(
@@ -691,32 +688,29 @@ export function settleMonthly(
       state.morale = Math.max(0, state.morale - deceased.length * DEATH_MORALE_PENALTY);
       cleanupDeceasedElders(state);
 
-      // 补员：仅补齐内门坐化空出的席位，从外门最强者（按实力等级、真元排序）依次递补。
-      const innerDeaths = deceased.filter((dead) => dead.role === "inner").length;
+      // 补员：仅补齐内门坐化空出的席位；外门恒满员——自外门递补生成新内门弟子入册，外门总数不变。
+      // 练气岗加成：按在岗练气外门人数给递补弟子携带初始真元（外门修行底子随人带来）。
+      const innerDeaths = deceased.length;
+      const qiBonus = effectiveOuterJobsOf(state).qi * OUTER_QI_ZHENYUAN_PER_WORKER;
       let promoted = 0;
-      while (
-        promoted < innerDeaths &&
-        state.disciples.some((disciple) => disciple.role === "outer")
-      ) {
-        const strongest = state.disciples
-          .filter((disciple) => disciple.role === "outer")
-          .sort(
-            (a, b) =>
-              b.realmLevel - a.realmLevel || b.zhenyuan - a.zhenyuan || a.id.localeCompare(b.id),
-          )[0];
-        if (!strongest) break;
-        strongest.role = "inner";
-        promoted += 1;
-        promotions.push({
-          discipleId: strongest.id,
-          discipleName: strongest.name,
-          from: "outer",
-          to: "inner",
+      while (promoted < innerDeaths) {
+        state.discipleSeq += 1;
+        const successor = generateDisciple({
+          gameSeed: state.seed,
+          discipleId: `d-${state.discipleSeq}`,
+          ordinal: state.discipleSeq,
+          usedNames: state.disciples.map((disciple) => disciple.name),
         });
+        if (qiBonus > 0) successor.zhenyuan += qiBonus;
+        state.disciples.push(successor);
+        promoted += 1;
+        promotions.push({ discipleId: successor.id, discipleName: successor.name });
         appendChronicle(state, {
           turn,
           kind: "normal",
-          text: `外门弟子 ${strongest.name} 因同门仙逝递补入内门。`,
+          text: `${successor.name} 因同门仙逝递补入内门${
+            qiBonus > 0 ? `，携练气真元 ${qiBonus} 点入门` : ""
+          }。`,
         });
       }
     }
@@ -724,7 +718,6 @@ export function settleMonthly(
 
   const result: SettlementResult = {
     turn,
-    policy,
     crisis,
     spiritStonesDelta,
     moraleDelta,
@@ -733,6 +726,9 @@ export function settleMonthly(
     deaths,
     promotions,
   };
+  if (workshopsOutcome?.completedPills.length)
+    result.completedPills = workshopsOutcome.completedPills;
+  if (workshopsOutcome?.completedGear.length) result.completedGear = workshopsOutcome.completedGear;
   if (expeditionReport) result.expedition = expeditionReport;
   if (warRecord) result.war = warRecord;
   if (rivalDeclaredWar) result.rivalDeclaredWar = true;
@@ -842,7 +838,7 @@ export const ENDING_RATING_THRESHOLDS = {
 export type EndingStatsInput = {
   /** 用时（游戏年）。 */
   gameYears: number;
-  /** 突破成功总次数（含飞升）。 */
+  /** 突破成功总次数。 */
   breakthroughCount: number;
   warWins: number;
   warTotal: number;

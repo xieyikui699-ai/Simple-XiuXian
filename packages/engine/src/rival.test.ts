@@ -9,7 +9,6 @@ import { realmStageForLevel } from "./realms.js";
 import {
   MAJOR_BREAKTHROUGH_LEVELS,
   RIVAL_INITIAL_INNER_DISCIPLES,
-  RIVAL_INITIAL_OUTER_DISCIPLES,
   type RivalSect,
   WAR_COOLDOWN_MONTHS,
   WAR_DECLARE_ROLL_PCT,
@@ -20,7 +19,6 @@ import {
   prestigeDeltaForSectWar,
   prestigeDeltaForSpar,
   rivalGearTierForRank,
-  rivalRecruitPlan,
   rivalWarDecision,
 } from "./rival.js";
 import {
@@ -37,7 +35,7 @@ import {
   selectSectWarFighters,
   warPlunder,
 } from "./sect-war.js";
-import { RECRUIT_COST } from "./sect.js";
+import { RECRUIT_COST, sectLimitsFor } from "./sect.js";
 import {
   DECLINE_COLLAPSE_MONTHS,
   annexationTriggered,
@@ -63,7 +61,6 @@ function makeFighter(
     realmLevel,
     zhenyuan: overrides.zhenyuan ?? 0,
     breakthroughFailures: 0,
-    role: overrides.role ?? "inner",
     rootType: "single",
     rootElements: ["metal"],
     attributes: { strength: 50, soulPower: 50, agility: 50, physique: 50, comprehension: 50 },
@@ -78,18 +75,13 @@ function stubStateFor(rival: RivalSect): GameState {
 }
 
 describe("NPC 宗门生成（rival）", () => {
-  it("开局掌门 1 + 内门 3 + 外门 20，与玩家同为 1 级宗门、初始 2000 灵石 / 士气 70 / 声望 50", () => {
+  it("开局掌门 1 + 内门 3（外门恒按等级上限满员、不入名册），与玩家同为 1 级宗门、初始 2000 灵石 / 士气 70 / 声望 50", () => {
     assert.equal(RIVAL_INITIAL_INNER_DISCIPLES, 3);
-    assert.equal(RIVAL_INITIAL_OUTER_DISCIPLES, 20);
+    assert.equal(sectLimitsFor(1).outerLimit, 100);
     const rival = createRivalSect({ seed: "rival-golden", name: "玄阴宗", difficulty: 1 });
-    assert.equal(rival.disciples.length, 24);
-    const inner = rival.disciples.filter((disciple) => disciple.role === "inner");
-    const outer = rival.disciples.filter((disciple) => disciple.role === "outer");
-    assert.equal(inner.length, 4);
-    assert.equal(outer.length, 20);
+    assert.equal(rival.disciples.length, 4);
     const leader = rival.disciples.find((disciple) => disciple.id === rival.leaderId);
     assert.ok(leader);
-    assert.equal(leader.role, "inner");
     assert.equal(rival.sectRank, 1);
     assert.equal(rival.spiritStones, 2000);
     assert.equal(rival.morale, 70);
@@ -98,7 +90,7 @@ describe("NPC 宗门生成（rival）", () => {
       assert.equal(disciple.realmLevel, 1);
       assert.equal(disciple.zhenyuan, 0);
     }
-    assert.equal(new Set(rival.disciples.map((disciple) => disciple.name)).size, 24);
+    assert.equal(new Set(rival.disciples.map((disciple) => disciple.name)).size, 4);
   });
 
   it("同一生成器：同 seed 双跑 deepEqual（禁 Math.random）", () => {
@@ -120,13 +112,11 @@ describe("NPC 月度运行时（rival，确定性）", () => {
       const rival = createRivalSect({ seed: "rival-golden", name: "玄阴宗", difficulty });
       // 调平后首月真元即超 1 级需求，会触发突破清零；把内门抬到筑基后期（需求 5,000）观察净增。
       for (const disciple of rival.disciples) {
-        if (disciple.role !== "inner") continue;
         disciple.realmLevel = 6;
         disciple.realm = realmStageForLevel(6).realm;
       }
       const advanced = advanceRivalSectMonthly(rival, 2);
       for (const disciple of advanced.disciples) {
-        if (disciple.role !== "inner") continue;
         const before = rival.disciples.find((entry) => entry.id === disciple.id);
         assert.ok(before);
         const gain = monthlyZhenyuanGain(stubStateFor(rival), before);
@@ -135,34 +125,7 @@ describe("NPC 月度运行时（rival，确定性）", () => {
     }
   });
 
-  it("招募：难度 1.0 与 1.2 首月各招 1 名外门并支付 300 灵石；0.8 首月不招", () => {
-    const base = createRivalSect({ seed: "rival-golden", name: "玄阴宗", difficulty: 1 });
-    const advanced = advanceRivalSectMonthly(base, 2);
-    assert.equal(advanced.disciples.filter((disciple) => disciple.role === "outer").length, 21);
-    assert.equal(advanced.spiritStones, 2000 - RECRUIT_COST);
-    const slow = advanceRivalSectMonthly(
-      createRivalSect({ seed: "rival-golden", name: "玄阴宗", difficulty: 0.8 }),
-      2,
-    );
-    assert.equal(slow.disciples.filter((disciple) => disciple.role === "outer").length, 20);
-    assert.equal(slow.spiritStones, 2000);
-    const fast = advanceRivalSectMonthly(
-      createRivalSect({ seed: "rival-golden", name: "玄阴宗", difficulty: 1.2 }),
-      2,
-    );
-    assert.equal(fast.disciples.filter((disciple) => disciple.role === "outer").length, 21);
-    assert.equal(fast.spiritStones, 2000 - RECRUIT_COST);
-  });
-
-  it("招募频率按难度小数配额进位（结转按 0.1 精度取整避免浮尘）", () => {
-    assert.deepEqual(rivalRecruitPlan(1, 0), { recruits: 1, carryOut: 0 });
-    assert.deepEqual(rivalRecruitPlan(0.8, 0), { recruits: 0, carryOut: 0.8 });
-    assert.deepEqual(rivalRecruitPlan(0.8, 0.8), { recruits: 1, carryOut: 0.6 });
-    assert.deepEqual(rivalRecruitPlan(1.2, 0), { recruits: 1, carryOut: 0.2 });
-    assert.deepEqual(rivalRecruitPlan(1.2, 0.8), { recruits: 2, carryOut: 0 });
-  });
-
-  it("满足升阶条件自动升阶：1→2 消耗 5,000 灵石，随后仍按频率招募", () => {
+  it("满足升阶条件自动升阶：1→2 消耗 5,000 灵石，外门随等级扩容至 300", () => {
     const staged = structuredClone(
       createRivalSect({ seed: "rival-golden", name: "玄阴宗", difficulty: 1 }),
     );
@@ -172,7 +135,8 @@ describe("NPC 月度运行时（rival，确定性）", () => {
     leader.realmLevel = 4;
     const advanced = advanceRivalSectMonthly(staged, 2);
     assert.equal(advanced.sectRank, 2);
-    assert.equal(advanced.spiritStones, 6000 - 5000 - RECRUIT_COST);
+    // 经济：外门供奉 100×2 − 内门俸禄 4×10 = +160；升阶 −5,000。
+    assert.equal(advanced.spiritStones, 6000 + 160 - 5000);
   });
 
   it("突破尝试后真元清零（成败皆清，同玩家规则）", () => {
@@ -181,7 +145,8 @@ describe("NPC 月度运行时（rival，确定性）", () => {
     );
     const leader = staged.disciples.find((disciple) => disciple.id === staged.leaderId);
     assert.ok(leader);
-    leader.zhenyuan = 290;
+    // 设为恰好达阈：月结先加当月真元再判突破，必触发一次尝试（成败皆清零）。
+    leader.zhenyuan = realmStageForLevel(1).requiredZhenyuan;
     const advanced = advanceRivalSectMonthly(staged, 2);
     const after = advanced.disciples.find((disciple) => disciple.id === leader.id);
     assert.ok(after);
@@ -221,7 +186,7 @@ describe("声望规则（rival，设计 §声望）", () => {
 });
 
 describe("会战（sect-war）", () => {
-  it("各派 3 名可出战内门（默认最强 3，不足 3 人按实有数），排除伤势与外门，按实力等级降序（同值真元高者先）", () => {
+  it("各派 3 名可出战弟子（默认最强 3，不足 3 人按实有数），排除伤势（外门只是数字不入会战），按实力等级降序（同值真元高者先）", () => {
     assert.equal(SECT_WAR_FIGHTERS, 3);
     const roster = [
       makeFighter({ id: "p-1", realmLevel: 5 }),
@@ -229,7 +194,6 @@ describe("会战（sect-war）", () => {
       makeFighter({ id: "p-3", realmLevel: 3, zhenyuan: 50 }),
       makeFighter({ id: "p-4", realmLevel: 2 }),
       makeFighter({ id: "p-5", realmLevel: 9, injuryMonthsLeft: 2 }),
-      makeFighter({ id: "p-6", realmLevel: 10, role: "outer" }),
     ];
     assert.deepEqual(
       selectSectWarFighters(roster).map((disciple) => disciple.id),

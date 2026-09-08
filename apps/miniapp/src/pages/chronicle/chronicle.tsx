@@ -4,6 +4,7 @@ import { reLaunch, useDidShow } from "@tarojs/taro";
 import { useState } from "react";
 import { useGame } from "../../store/use-game";
 import { formatTurn } from "../../ui/display";
+import { BackBar } from "../../ui/nav";
 import "./chronicle.css";
 
 const KIND_LABELS: Record<string, string> = {
@@ -93,44 +94,47 @@ export default function ChroniclePage() {
 
   return (
     <View className="page">
-      {battleReplayAllowed(state) && (
-        <View className="card">
-          <View className="card-title">战报回放（最新 {battles.length} 场）</View>
-          <Text className="muted">点击一场战斗展开逐回合记录；更早战报仅存纪事摘要。</Text>
-          {battles.map((report, index) => {
-            const key = `${report.seed}-${index}`;
-            const expanded = expandedKey === key;
-            return (
-              <View key={key} className="replay-item">
-                <View
-                  className={`replay-head replay-head-${report.winner === "A" ? "win" : report.winner === "B" ? "lose" : "draw"}`}
-                  onClick={() => setExpandedKey(expanded ? null : key)}
-                >
-                  <Text>{battleTitle(report)}</Text>
+      <BackBar title="宗门纪事" />
+      <View className="page-body">
+        {battleReplayAllowed(state) && (
+          <View className="card">
+            <View className="card-title">战报回放（最新 {battles.length} 场）</View>
+            <Text className="muted">点击一场战斗展开逐回合记录；更早战报仅存纪事摘要。</Text>
+            {battles.map((report, index) => {
+              const key = `${report.seed}-${index}`;
+              const expanded = expandedKey === key;
+              return (
+                <View key={key} className="replay-item">
+                  <View
+                    className={`replay-head replay-head-${report.winner === "A" ? "win" : report.winner === "B" ? "lose" : "draw"}`}
+                    onClick={() => setExpandedKey(expanded ? null : key)}
+                  >
+                    <Text>{battleTitle(report)}</Text>
+                  </View>
+                  {battleRows(report, expanded)}
                 </View>
-                {battleRows(report, expanded)}
-              </View>
-            );
-          })}
-        </View>
-      )}
-
-      <View className="card">
-        <View className="card-title">宗门纪事（最新在前，最多留存 500 条）</View>
-        {state.chronicle.length === 0 && <Text className="muted">尚无纪事。</Text>}
-        {state.chronicle.map((entry, index) => (
-          <View
-            // 纪事无稳定 id，以 turn+序号 充当键。
-            key={`${entry.turn}-${index}`}
-            className={`chronicle-row chronicle-${entry.kind}`}
-          >
-            <Text className="chronicle-kind">{KIND_LABELS[entry.kind]}</Text>
-            <View className="chronicle-body">
-              <Text>{entry.text}</Text>
-              <Text className="muted">{formatTurn(entry.turn)}</Text>
-            </View>
+              );
+            })}
           </View>
-        ))}
+        )}
+
+        <View className="card">
+          <View className="card-title">宗门纪事（最新在前，最多留存 500 条）</View>
+          {state.chronicle.length === 0 && <Text className="muted">尚无纪事。</Text>}
+          {state.chronicle.map((entry, index) => (
+            <View
+              // 纪事无稳定 id，以 turn+序号 充当键。
+              key={`${entry.turn}-${index}`}
+              className={`chronicle-row chronicle-${entry.kind}`}
+            >
+              <Text className="chronicle-kind">{KIND_LABELS[entry.kind]}</Text>
+              <View className="chronicle-body">
+                <Text>{entry.text}</Text>
+                <Text className="muted">{formatTurn(entry.turn)}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
       </View>
     </View>
   );
