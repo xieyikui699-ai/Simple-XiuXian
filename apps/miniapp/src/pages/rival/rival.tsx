@@ -9,6 +9,7 @@ import type { GameState } from "@simple-xiuxian/engine";
 import { Button, Text, View } from "@tarojs/components";
 import { reLaunch, useDidShow } from "@tarojs/taro";
 import { getGameStore, useGame } from "../../store/use-game";
+import { AdvanceBar } from "../../ui/advance-bar";
 import { formatNumber, formatTurn, realmToneClass } from "../../ui/display";
 import { BackBar } from "../../ui/nav";
 import "./rival.css";
@@ -135,6 +136,7 @@ export default function RivalPage() {
           ))}
         </View>
       </View>
+      <AdvanceBar />
     </View>
   );
 }

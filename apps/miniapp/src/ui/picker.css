@@ -1,10 +1,25 @@
-/* 共享选人面板。 */
+/* 共享选人模态弹层：遮罩盖住当前屏（absolute 定位于页面/舞台，不随 page-body 滚动），底部弹起。 */
+.picker-mask {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  background: rgba(43, 36, 32, 0.45);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
 .picker {
-  margin-top: 16rpx;
-  padding: 16rpx;
-  background: var(--card-2);
+  max-height: 70%;
+  overflow-y: auto;
+  padding: 24rpx 20rpx calc(28rpx + env(safe-area-inset-bottom));
+  background: var(--card);
   border: 2rpx solid var(--line);
-  border-radius: 14rpx;
+  border-bottom: none;
+  border-radius: 20rpx 20rpx 0 0;
   display: flex;
   flex-direction: column;
   gap: 8rpx;
@@ -12,7 +27,7 @@
 
 .picker-title {
   font-weight: 600;
-  font-size: 26rpx;
+  font-size: 28rpx;
 }
 
 .picker-row {
@@ -24,14 +39,26 @@
   border-radius: 8rpx;
 }
 
-.picker-row:last-child {
-  border-bottom: none;
-}
-
 .picker-row:active {
   background: rgba(138, 79, 36, 0.08);
 }
 
 .picker-row-disabled {
   opacity: 0.5;
+}
+
+/* 有副文案的行：名字·境界与副文案（寿命/已穿法宝）同一行，副文案靠右。 */
+.picker-row-line {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.picker-row-sub {
+  text-align: right;
+}
+
+.picker-cancel {
+  margin-top: 12rpx;
 }

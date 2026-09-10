@@ -1,8 +1,10 @@
-import type { BattleReport, GameState } from "@simple-xiuxian/engine";
+import type { BattleReport, BattleReportSegment, GameState } from "@simple-xiuxian/engine";
+import { battleSourceLabel, formatBattleReportSegments } from "@simple-xiuxian/engine";
 import { Text, View } from "@tarojs/components";
 import { reLaunch, useDidShow } from "@tarojs/taro";
 import { useState } from "react";
 import { useGame } from "../../store/use-game";
+import { AdvanceBar } from "../../ui/advance-bar";
 import { formatTurn } from "../../ui/display";
 import { BackBar } from "../../ui/nav";
 import "./chronicle.css";
@@ -13,66 +15,43 @@ const KIND_LABELS: Record<string, string> = {
   normal: "记事",
 };
 
-const SOURCE_LABELS: Record<string, string> = {
-  "sect-war": "会战",
-  expedition: "历练",
-  sparring: "切磋",
-};
-
-const ACTION_KIND_LABELS: Record<string, string> = {
-  basic: "普攻",
-  spell: "法术",
-  skip: "冰冻跳过",
-  burn: "灼烧结算",
-};
-
 function battleTitle(report: BattleReport): string {
-  const source = SOURCE_LABELS[report.source ?? ""] ?? "战斗";
+  const source = battleSourceLabel(report.source);
   const verdict = report.winner === "A" ? "我方胜" : report.winner === "B" ? "对方胜" : "平局";
   return `${formatTurn(report.turn ?? 0)} · ${source} · ${verdict}（${report.rounds} 回合）`;
 }
 
+/** 单行分段渲染：人名段按 tone 着色（A 我方绿 / B 对方红），其余纯文本。 */
+function renderSegments(segments: BattleReportSegment[]) {
+  return segments.map((segment, segIndex) => {
+    // biome-ignore lint/suspicious/noArrayIndexKey: 段序稳定不重排
+    if (!segment.tone) return <Text key={segIndex}>{segment.text}</Text>;
+    const cls =
+      segment.tone === "own" ? "replay-name replay-name-own" : "replay-name replay-name-enemy";
+    return (
+      // biome-ignore lint/suspicious/noArrayIndexKey: 段序稳定不重排
+      <Text key={segIndex} className={cls}>
+        {segment.text}
+      </Text>
+    );
+  });
+}
+
 function battleRows(report: BattleReport, expanded: boolean) {
   if (!expanded) return null;
+  // 文字战报：引擎叙事层逐行转写（谁与谁对战、谁用了什么、对谁造成多少伤害）。
   return (
     <View className="replay-body">
-      {report.actions.map((action, index) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: 战报 actions 只读不重排，序号即稳定键
-        <View key={index} className="replay-row">
-          <Text className="replay-round">R{action.round}</Text>
-          <Text className={`replay-side replay-side-${action.actor}`}>
-            {action.actor === "A" ? "我方" : "对方"}
+      {formatBattleReportSegments(report).map((segments, index) => {
+        const line = segments.map((segment) => segment.text).join("");
+        const cls = `replay-line${line.startsWith("——") ? " replay-line-round" : line.startsWith("· ") ? " replay-line-note" : ""}`;
+        return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: 战报行只读不重排，序号即稳定键
+          <Text key={index} className={cls}>
+            {renderSegments(segments)}
           </Text>
-          <Text className="replay-kind">{ACTION_KIND_LABELS[action.kind] ?? action.kind}</Text>
-          <Text className="replay-detail">
-            {action.hit === false
-              ? "未命中"
-              : `伤害 ${action.damage}${action.crit ? "（会心）" : ""}`}
-            {action.shieldAbsorbed > 0 ? ` · 护盾吸收 ${action.shieldAbsorbed}` : ""}
-            {action.lifestealHeal > 0 ? ` · 吸血回 ${action.lifestealHeal}` : ""}
-            {action.reflectDamage > 0 ? ` · 反伤 ${action.reflectDamage}` : ""}
-          </Text>
-          <Text className="replay-hp">
-            血 {action.hp.A}/{action.hp.B}
-          </Text>
-        </View>
-      ))}
-      {report.actions.some((action) => action.statusNotes.length > 0) && (
-        <View className="replay-notes">
-          {report.actions
-            .flatMap((action) => action.statusNotes.map((note) => ({ round: action.round, note })))
-            .map((entry, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: 状态注记列表只读不重排
-              <Text key={index} className="muted">
-                R{entry.round}：{entry.note}
-              </Text>
-            ))}
-        </View>
-      )}
-      <Text className="muted">
-        终局生命 我方 {report.finalHp.A} / 对方 {report.finalHp.B} · 总伤害 {report.totalDamage.A}/
-        {report.totalDamage.B}
-      </Text>
+        );
+      })}
     </View>
   );
 }
@@ -136,6 +115,7 @@ export default function ChroniclePage() {
           ))}
         </View>
       </View>
+      <AdvanceBar />
     </View>
   );
 }

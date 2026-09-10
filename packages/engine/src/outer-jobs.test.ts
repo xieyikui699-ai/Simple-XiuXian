@@ -22,7 +22,7 @@ function newGame(seed = "outer-seed-1"): GameState {
 }
 
 describe("外门分工配置", () => {
-  it("外门总数恒等于宗门等级上限；新局无分工配置 = 全员供奉", () => {
+  it("外门总数恒等于宗门等级上限；新局无分工配置 = 未分岗", () => {
     const state = newGame();
     assert.equal(outerTotalOf(state), 100);
     assert.deepEqual(outerJobsOf(state), { mining: 0, qi: 0 });
@@ -124,7 +124,7 @@ describe("经济对照（挖矿月入）与递补对照（练气携真元）", (
 });
 
 describe("旧档兼容与确定性", () => {
-  it("旧档缺 outerJobs 字段：按全员供奉口径工作，月结照常", () => {
+  it("旧档缺 outerJobs 字段：按未分岗口径工作，月结照常", () => {
     const state = newGame();
     assert.equal(state.outerJobs, undefined);
     const { state: after } = settleMonthly(state);

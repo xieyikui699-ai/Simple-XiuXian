@@ -24,6 +24,7 @@ const {
   setWorkshopStaff,
   settleMonthly,
   startWorkshopTask,
+  upgradeRequirementFor,
   upgradeSect,
   usePill,
   wearGear,
@@ -80,15 +81,15 @@ function manageSect(stateInput) {
   // 1. 升阶（留 2000 灵石缓冲）。
   const reason = sectUpgradeFailureReason(state);
   if (!reason) {
-    const requirement = state.sectRank === 1 ? 5000 : 30000;
-    if (state.spiritStones >= requirement + 2000) state = tryCommand(state, upgradeSect);
+    const cost = upgradeRequirementFor(state.sectRank)?.cost ?? 0;
+    if (state.spiritStones >= cost + 2000) state = tryCommand(state, upgradeSect);
   }
   const innerLimit = state.sectRank === 1 ? 10 : state.sectRank === 2 ? 24 : 48;
   const inner = state.disciples;
   // 外门恒按宗门等级上限满员（100/300/500），无法手招。
   const outer = sectLimitsFor(state.sectRank).outerLimit;
 
-  // 2-3. 招募直入内门（外门不再经手）：内门规模随外门供奉经济配比增长（供奉 ≈ 俸禄平衡），
+  // 2-3. 招募直入内门（外门不再经手）：供奉已删除后无被动收入（模拟玩家尚未配挖矿，策略待重调），
   // 有 1200 灵石余量才扩编（俸禄 10/月/人）。
   const targetInner = Math.min(innerLimit, Math.max(3, Math.floor(outer / 5)));
   if (inner.length < targetInner && state.spiritStones >= 1200) {
@@ -161,9 +162,9 @@ function manageSect(stateInput) {
     state = tryCommand(state, (s) => setWorkshopStaff(s, "gear", gearStaff));
   }
 
-  // 7. 研读功法/法术（藏经阁拥有即学）。
-  const library = state.library ?? { techniqueIds: [], spellIds: [] };
+  // 7. 研读功法/法术（藏经阁拥有即学；功法书研读后消耗，逐人重读藏书避免重复投同一册）。
   for (const disciple of state.disciples) {
+    const library = state.library ?? { techniqueIds: [], spellIds: [] };
     if (!disciple.techniqueId) {
       const artId =
         TECHNIQUE_PREFERENCE.find((id) => library.techniqueIds.includes(id)) ??

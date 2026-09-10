@@ -2,25 +2,22 @@
 // 数值来源：设计文档 §丹药系统/§装备系统/§月结流程第 4 步 + 完整版《修仙》crafting-v2 公式。
 //
 // 生产模型口径（与完整版对齐，去掉多炉制与成功率/炸炉）：
-// - 每房至多 1 名主持（丹师/工匠，成年内门、不战斗不修炼）：境界越高加成越高（每境界等级 +20%，
+// - 每房至多 1 名主持（丹师/工匠，成年内门、不历练但修炼照常）：境界越高加成越高（每境界等级 +20%，
 //   元婴前期 +200% 封顶），持丹道/器道天赋再 +20%（与境界加成合计仍封顶 200%）；无主持照常开工。
-// - 投入外门弟子即自动开炉：拖动滑杆人数 ≥1 时该房自动挂默认任务（丹房炼丹 / 器坊武器档 1），
-//   器坊点选图纸可换目标（换任务进度作废）。
+// - 投入外门弟子即自动开炉：拖动滑杆人数 ≥1 时该房自动挂默认任务（丹房炼丹 / 器坊炼法宝），
+//   无图纸/档位点选。
 // - 挂任务免费、不预扣灵石；月结按在册人手推进：每名外门弟子每月 +1 点（基础，受主持加成乘算），
 //   并消耗月耗 1 灵石/人/月（丹房/器坊同值）。
 // - 丹房不选丹方：点数统一 PILL_TASK_POINTS，满点出炉时在目录两种丹药中随机（各 50%，sha256 掷骰）。
+//   器坊同理固定炼法宝：点数统一 GEAR_TASK_POINTS，满点出炉时在法宝目录十件中随机其一。
 // - 点数满 → 出炉入仓库并自动连炉（进度清零续炼同任务；换任务/抽走人手即打断）。
 // - 人手不足（0 人）或灵石不敷月耗 → 该房当月停摆：不推进、不扣费（workshopPauseReason 供 UI 展示）。
-// - 装备仍按宗门等级限档；旧档 jobs 旧结构（points/tasks 岗位点数池、pill 任务带 pillId）读时归一迁移。
+// - 旧档 jobs 旧结构（points/tasks 岗位点数池、pill 任务带 pillId、gear 任务带 slot/tier）读时归一迁移。
 import {
   type CraftJobKind,
-  FORGE_TIER_LIMIT_BY_RANK,
-  GEAR_CRAFT_POINTS,
-  GEAR_SLOT_DISPLAY_NAMES,
-  type GearSlot,
-  type GearTier,
   PILLS,
-  getGear,
+  TREASURES,
+  treasureEffectDescription,
   workshopCraftYieldPct,
 } from "./catalog.js";
 import { deterministicRoll } from "./hash.js";
@@ -41,6 +38,8 @@ import { CRAFT_JOB_KINDS, emptySectJobs, emptyWarehouse } from "./state.js";
 export const WORKSHOP_MASTER_LIMIT = 1;
 /** 丹房炼制点数统一值（不选丹方：满点出炉时目录两种丹药各 50% 随机）。 */
 export const PILL_TASK_POINTS = 300;
+/** 器坊炼制点数统一值（不选图纸：满点出炉法宝目录十件随机其一）。 */
+export const GEAR_TASK_POINTS = 500;
 /** 每名投入的外门弟子每月 +1 点（基础点数，主持加成乘算其上）。 */
 export const WORKSHOP_POINTS_PER_OUTER_PER_MONTH = 1;
 /** 主持境界加成：每境界等级 +20%（练气前期 +20% … 元婴前期 +200% 封顶）。 */
@@ -79,7 +78,7 @@ function normalizeWorkshop(raw: unknown): WorkshopState {
   return { workers: workers.slice(0, WORKSHOP_MASTER_LIMIT), assignedOuter, task };
 }
 
-/** 任务规整：丹房任务剥旧档 pillId（现按统一点数随机出炉）；器坊任务原样保留。 */
+/** 任务规整：丹房任务剥旧档 pillId（现按统一点数随机出炉）；器坊任务剥旧档 slot/tier（现满点随机出炉法宝）。 */
 function normalizeTask(raw: unknown): WorkshopTask | null {
   if (typeof raw !== "object" || raw === null) return null;
   const task = raw as { kind?: unknown; accumulatedPoints?: unknown };
@@ -88,15 +87,7 @@ function normalizeTask(raw: unknown): WorkshopTask | null {
     typeof task.accumulatedPoints === "number" && Number.isFinite(task.accumulatedPoints)
       ? Math.max(0, task.accumulatedPoints)
       : 0;
-  if (task.kind === "pill") return { kind: "pill", accumulatedPoints };
-  const gear = raw as { slot?: unknown; tier?: unknown };
-  if (typeof gear.slot !== "string" || typeof gear.tier !== "number") return null;
-  return {
-    kind: "gear",
-    slot: gear.slot as GearSlot,
-    tier: gear.tier as GearTier,
-    accumulatedPoints,
-  };
+  return { kind: task.kind, accumulatedPoints };
 }
 
 export function jobsOf(state: Readonly<GameState>): SectJobs {
@@ -225,11 +216,11 @@ export function setWorkshopStaff(
 
 // ─── 自动开炉（投入外门弟子即开工，无需点选任务、无需主持）────────────────
 
-/** 自动开炉默认任务：丹房即炼丹；器坊默认法宝档 1（点选图纸可换目标）。 */
+/** 自动开炉默认任务：丹房即炼丹；器坊即炼法宝（无图纸点选，满点随机出炉目录十件其一）。 */
 function autoTaskFor(kind: CraftJobKind): WorkshopTask {
   return kind === "pill"
     ? { kind: "pill", accumulatedPoints: 0 }
-    : { kind: "gear", slot: "talisman", tier: 1, accumulatedPoints: 0 };
+    : { kind: "gear", accumulatedPoints: 0 };
 }
 
 /** 投入人数 ≥1 且空闲时自动挂默认任务（滑杆投入与月结推进共用同一推导）。 */
@@ -240,7 +231,7 @@ function ensureAutoTask(kind: CraftJobKind, workshop: WorkshopState): void {
 // ─── 在炉任务（挂任务免费，月结推进；换任务进度作废）────────────────────
 
 export type PillTaskSpec = { kind: "pill" };
-export type GearTaskSpec = { kind: "gear"; slot: GearSlot; tier: GearTier };
+export type GearTaskSpec = { kind: "gear" };
 export type WorkshopTaskSpec = PillTaskSpec | GearTaskSpec;
 
 export type WorkshopTaskOutcome = {
@@ -248,10 +239,10 @@ export type WorkshopTaskOutcome = {
   task: WorkshopTask;
 };
 
-/** 任务总点数（丹房统一点数 / 装备点数表）。 */
+/** 任务总点数（丹房/器坊各自统一点数）。 */
 export function workshopTaskTotalPoints(task: WorkshopTask): number {
   if (task.kind === "pill") return PILL_TASK_POINTS;
-  return GEAR_CRAFT_POINTS[task.tier];
+  return GEAR_TASK_POINTS;
 }
 
 /** 挂任务/换任务：不校验灵石不扣费（月结按月扣月耗）；同任务幂等，换任务进度作废。 */
@@ -266,9 +257,7 @@ export function startWorkshopTask(
   if (spec.kind === "pill") {
     task = { kind: "pill", accumulatedPoints: 0 };
   } else {
-    if (!getGear(spec.slot, spec.tier)) throw new Error("gear_invalid");
-    if (spec.tier > maxForgeTierForRank(stateInput.sectRank)) throw new Error("gear_tier_locked");
-    task = { kind: "gear", slot: spec.slot, tier: spec.tier, accumulatedPoints: 0 };
+    task = { kind: "gear", accumulatedPoints: 0 };
   }
 
   const state = structuredClone(stateInput) as GameState;
@@ -277,12 +266,7 @@ export function startWorkshopTask(
   const workshop = normalizeWorkshop(jobs[kind]);
   jobs[kind] = workshop;
   const previous = workshop.task;
-  const sameTask =
-    previous !== null &&
-    previous.kind === task.kind &&
-    (previous.kind === "pill" ||
-      (previous.slot === (task as typeof previous).slot &&
-        previous.tier === (task as typeof previous).tier));
+  const sameTask = previous !== null && previous.kind === task.kind;
   if (sameTask) {
     return { state, task: previous };
   }
@@ -290,23 +274,13 @@ export function startWorkshopTask(
   const title =
     task.kind === "pill"
       ? `丹房开始炼制丹药（出炉随机：${PILLS.map((pill) => pill.name).join("/")}各半）。`
-      : `器坊开始炼制${GEAR_SLOT_DISPLAY_NAMES[task.slot]}（档${task.tier}，共需 ${workshopTaskTotalPoints(task)} 点）。`;
-  const previousName =
-    previous === null || previous.kind === "pill"
-      ? ""
-      : `原${GEAR_SLOT_DISPLAY_NAMES[previous.slot]}（档${previous.tier}）进度作废。`;
+      : `器坊开始炼制法宝（出炉随机：${TREASURES.length} 种法宝其一，共需 ${workshopTaskTotalPoints(task)} 点）。`;
   appendChronicle(state, {
     turn: state.currentTurn,
     kind: "normal",
-    text: `${title}${previousName}`,
+    text: `${title}${previous === null ? "" : "原任务进度作废。"}`,
   });
   return { state, task };
-}
-
-// ─── 器坊限档 ────────────────────────────────────────────────────────────
-
-export function maxForgeTierForRank(rank: 1 | 2 | 3): GearTier {
-  return FORGE_TIER_LIMIT_BY_RANK[rank];
 }
 
 // ─── 停摆判定与出炉预估（UI 与月结共用同一推导）─────────────────────────
@@ -364,6 +338,14 @@ export type ProductionAdvanceResult = {
   /** 本月出炉的装备（已入仓库）。 */
   completedGear: WarehouseGearItem[];
 };
+
+/** 出炉法宝掷骰：目录十件随机其一（均匀十等分；命名空间 `${seed}:gear-craft:${turn}` 确定性可对拍）。 */
+export function rollCraftTreasure(seed: string, turn: number): (typeof TREASURES)[number] {
+  const roll = deterministicRoll(`${seed}:gear-craft:${turn}`);
+  const treasure = TREASURES[Math.floor((roll / 100) * TREASURES.length)] ?? TREASURES[0];
+  if (!treasure) throw new Error("treasure_catalog_empty");
+  return treasure;
+}
 
 export function advanceWorkshops(stateInput: Readonly<GameState>): ProductionAdvanceResult {
   if (stateInput.ending) throw new Error("game_already_ended");
@@ -436,15 +418,17 @@ export function advanceWorkshops(stateInput: Readonly<GameState>): ProductionAdv
       });
       workshop.task = { kind: "pill", accumulatedPoints: 0 };
     } else {
-      const gear: WarehouseGearItem = { slot: workshop.task.slot, tier: workshop.task.tier };
+      // 满点出炉：法宝目录十件随机其一（确定性掷骰可对拍）。
+      const treasure = rollCraftTreasure(state.seed, state.currentTurn);
+      const gear: WarehouseGearItem = { slot: "talisman", treasureId: treasure.id };
       warehouse.gear.push(gear);
       completedGear.push(gear);
       appendChronicle(state, {
         turn: state.currentTurn,
         kind: "normal",
-        text: `器坊出炉：${GEAR_SLOT_DISPLAY_NAMES[gear.slot]}（档${gear.tier}）炼制完成，已存入仓库（连炉续炼）。`,
+        text: `器坊出炉：炼成法宝「${treasure.name}」（${treasureEffectDescription(treasure)}），已存入仓库（连炉续炼）。`,
       });
-      workshop.task = { kind: "gear", slot: gear.slot, tier: gear.tier, accumulatedPoints: 0 };
+      workshop.task = { kind: "gear", accumulatedPoints: 0 };
     }
   }
 

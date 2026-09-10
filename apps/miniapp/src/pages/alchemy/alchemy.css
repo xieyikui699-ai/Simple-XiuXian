@@ -95,6 +95,13 @@
   gap: 12rpx;
 }
 
+/* 丹方两味并排一行（放不下再换行，避免窄屏溢出）。 */
+.craft-panel-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8rpx 16rpx;
+}
+
 .craft-row {
   display: flex;
   flex-direction: column;
@@ -112,29 +119,6 @@
 
 .craft-row-disabled {
   opacity: 0.55;
-}
-
-.forge-options {
-  display: flex;
-  flex-direction: row;
-  gap: 14rpx;
-  flex-wrap: wrap;
-}
-
-.forge-chip {
-  padding: 10rpx 26rpx;
-  border: 2rpx solid var(--line-strong);
-  border-radius: 999rpx;
-  font-size: 24rpx;
-  color: #5a4a2f;
-  background: var(--card-2);
-}
-
-.forge-chip-active {
-  background: var(--accent);
-  border-color: var(--accent-deep);
-  color: #fdf6e3;
-  font-weight: 600;
 }
 
 .craft-panel > .btn-mini {

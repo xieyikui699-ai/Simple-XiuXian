@@ -73,6 +73,10 @@
 
 .disciple-row {
   position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14rpx;
   padding: 18rpx 32rpx 18rpx 0;
   border-bottom: 2rpx solid var(--line);
 }
@@ -92,17 +96,19 @@
 }
 
 .disciple-name {
+  flex-shrink: 0;
   font-weight: 600;
   font-size: 28rpx;
 }
 
 .disciple-realm {
-  margin-top: 4rpx;
+  flex-shrink: 0;
   font-size: 24rpx;
 }
 
 .disciple-zhenyuan {
+  flex: 1;
+  min-width: 0;
   color: var(--muted);
   font-size: 22rpx;
-  margin-top: 6rpx;
 }

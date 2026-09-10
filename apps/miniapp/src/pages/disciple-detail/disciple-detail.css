@@ -126,3 +126,36 @@
   line-height: 68rpx;
   border-radius: 12rpx;
 }
+
+/* 功法/法术/法宝行可点按，行尾小箭头提示展开方向（▸ 收起 / ▾ 展开）。 */
+.attr-row-tap {
+  cursor: pointer;
+}
+
+/* 效果明细面板：点按对应行后在其下方展开。 */
+.effect-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  margin-bottom: 12rpx;
+  padding: 14rpx 16rpx;
+  background: var(--card-2);
+  border: 2rpx solid var(--line);
+  border-radius: 14rpx;
+}
+
+.effect-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.effect-title {
+  font-weight: 600;
+}
+
+.effect-line {
+  color: var(--ink-2);
+  font-size: 26rpx;
+  line-height: 40rpx;
+}

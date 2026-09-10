@@ -1,6 +1,6 @@
 // 月度结算（设计文档 §月结流程 8 步顺序锚点 MONTHLY_STEP_ORDER）：
-// ① 灵石结转（供奉/俸禄/危机判定，资源长老供奉 +20%；外门总数恒等于宗门等级上限）
-// ② 真元增长与突破判定（功法/聚灵丹/养气诀/战备长老增益接线；岗位占用者不修炼）
+// ① 灵石结转（挖矿上缴/俸禄/危机判定；外门不再供奉，产出只来自在岗分工）
+// ② 真元增长与突破判定（功法/聚灵丹/养气诀/战备长老增益接线；岗位/长老占用者照常修炼）
 // ③ 丹房/器坊点数与出炉（production.advanceWorkshops；旧档未启用生产时跳过以保持缺省口径）
 // ④ 历练与遭遇事件（每月自动进行 settleExpedition；报告落账：灵石/声望/士气/纪事/伤势/掉落/战报）
 // ⑤ NPC 宗门推进（E04-F02 接线：advanceRivalSectMonthly 同帧推进 + NPC 宣战判定）
@@ -53,12 +53,7 @@ import {
   sectWarRecord,
   selectSectWarFighters,
 } from "./sect-war.js";
-import {
-  INNER_SALARY_PER_DISCIPLE,
-  OUTER_INCOME_PER_DISCIPLE,
-  RECRUIT_COST,
-  sectLimitsFor,
-} from "./sect.js";
+import { INNER_SALARY_PER_DISCIPLE, RECRUIT_COST } from "./sect.js";
 import type {
   BreakthroughEvent,
   ChronicleEntry,
@@ -85,10 +80,21 @@ export const DEATH_MORALE_PENALTY = 5;
 export const BREAKTHROUGH_FAILURE_RATE_BONUS = 5;
 export const CHRONICLE_LIMIT = 500;
 
-/** 资源长老：外门供奉 +20%（设计 §宗门体系 长老简版）。 */
-export const RESOURCE_ELDER_OFFERING_PCT = 0.2;
 /** 战备长老：全门突破成功率 +3（百分点）。 */
 export const WAR_ELDER_BREAKTHROUGH_FLAT = 3;
+/** 灵矿长老：挖矿上缴每境界等级 +10%（练气前期 +10% … 元婴前期 +100% 封顶）。 */
+export const MINE_ELDER_MINING_PCT_PER_LEVEL = 0.1;
+/** 灵矿长老加成封顶 +100%（元婴前期）。 */
+export const MINE_ELDER_MAX_BONUS_PCT = 1;
+
+/** 灵矿长老挖矿加成：境界等级 × 10%，元婴前期（10 级）封顶 +100%；无长老/境界无效按 0 计。 */
+export function mineElderBonusPct(realmLevel: number): number {
+  const pct = Math.min(
+    MINE_ELDER_MAX_BONUS_PCT,
+    Math.max(0, realmLevel) * MINE_ELDER_MINING_PCT_PER_LEVEL,
+  );
+  return Math.round(pct * 10) / 10;
+}
 /** 突破顿悟概率：弟子突破成功时直接领悟一门未修法术的概率（百分点，不经藏经阁）。 */
 export const EPIPHANY_CHANCE_PCT = 20;
 /** 战报存档条数上限（最新在前；控制快照体积）。 */
@@ -156,7 +162,7 @@ export function monthlyZhenyuanGain(state: GameState, disciple: Disciple): numbe
   const rate = 1 + talentsZhenyuanPct(disciple.talentIds) + techniquePct + moralePct;
   const gain = Math.round(base * ROOT_MULTIPLIERS[disciple.rootType] * rate);
   const focusUntil = disciple.spiritFocusUntilTurn;
-  // 聚灵丹：持续期内真元获取 ×1.5（不叠加、重复服用刷新时长）。
+  // 聚灵丹：持续期内真元获取 ×1.5（倍率不叠加、重复服用时长累加）。
   return focusUntil !== undefined && focusUntil >= state.currentTurn
     ? Math.round(gain * 1.5)
     : gain;
@@ -185,7 +191,7 @@ function appendChronicle(state: GameState, entry: ChronicleEntry): void {
   if (state.chronicle.length > CHRONICLE_LIMIT) state.chronicle.length = CHRONICLE_LIMIT;
 }
 
-/** 岗位/长老占用者：不战斗、不修炼。 */
+/** 岗位/长老占用者：不历练（历练选将与会战名册均排除），修炼照常。 */
 function jobHolderIds(state: GameState): Set<string> {
   const ids = new Set<string>();
   if (state.jobs) {
@@ -195,6 +201,7 @@ function jobHolderIds(state: GameState): Set<string> {
   }
   if (state.elders?.resource) ids.add(state.elders.resource);
   if (state.elders?.war) ids.add(state.elders.war);
+  if (state.elders?.mine) ids.add(state.elders.mine);
   return ids;
 }
 
@@ -258,7 +265,7 @@ function applyExpeditionReport(
       }
     } else if (reward.type === "gear") {
       state.warehouse ??= { gear: [], pills: [] };
-      state.warehouse.gear.push({ slot: reward.slot, tier: reward.tier });
+      state.warehouse.gear.push({ slot: reward.slot, treasureId: reward.treasureId });
     } else {
       state.warehouse ??= { gear: [], pills: [] };
       const stock = state.warehouse.pills.find((entry) => entry.pillId === reward.pillId);
@@ -277,6 +284,7 @@ function cleanupDeceasedElders(state: GameState): void {
   const alive = new Set(state.disciples.map((disciple) => disciple.id));
   if (state.elders.resource && !alive.has(state.elders.resource)) state.elders.resource = undefined;
   if (state.elders.war && !alive.has(state.elders.war)) state.elders.war = undefined;
+  if (state.elders.mine && !alive.has(state.elders.mine)) state.elders.mine = undefined;
 }
 
 export type SettleMonthlyOutcome = {
@@ -300,13 +308,15 @@ export function settleMonthly(
   let moraleDelta = 0;
   let prestigeDelta = 0;
 
-  // ① 灵石结转：外门供奉（资源长老 +20%，外门总数恒等于宗门等级上限）+ 挖矿上缴 − 内门俸禄。
-  const outerCount = sectLimitsFor(state.sectRank).outerLimit;
+  // ① 灵石结转：挖矿上缴（灵矿长老按境界加成）− 内门俸禄（外门供奉已删除，外门无被动收入）。
   const innerCount = state.disciples.length;
-  const offeringMultiplier = state.elders?.resource ? 1 + RESOURCE_ELDER_OFFERING_PCT : 1;
-  const income =
-    Math.round(outerCount * OUTER_INCOME_PER_DISCIPLE * offeringMultiplier) +
-    effectiveOuterJobsOf(state).mining * OUTER_MINING_STONES_PER_MONTH;
+  const mineElder = state.elders?.mine
+    ? state.disciples.find((disciple) => disciple.id === state.elders?.mine)
+    : undefined;
+  const miningMultiplier = 1 + mineElderBonusPct(mineElder?.realmLevel ?? 0);
+  const income = Math.round(
+    effectiveOuterJobsOf(state).mining * OUTER_MINING_STONES_PER_MONTH * miningMultiplier,
+  );
   const expenses = innerCount * INNER_SALARY_PER_DISCIPLE;
   let crisis = false;
 
@@ -331,11 +341,9 @@ export function settleMonthly(
 
   // （外门自然流动已废除：外门恒按宗门等级上限满员，无来投/离去。）
 
-  // ② 真元增长与突破判定（名册全员内门；岗位/长老占用者不修炼）。
-  const occupied = jobHolderIds(state);
+  // ② 真元增长与突破判定（名册全员内门；岗位/长老占用者照常修炼）。
   const warElderFlat = state.elders?.war ? WAR_ELDER_BREAKTHROUGH_FLAT : 0;
   for (const disciple of state.disciples) {
-    if (occupied.has(disciple.id)) continue;
     // 元婴前期即修行尽头：圆满弟子不再积累真元、不再尝试突破。
     if (disciple.realmLevel >= TOP_REALM_LEVEL) continue;
     disciple.zhenyuan += monthlyZhenyuanGain(state, disciple);
@@ -532,7 +540,11 @@ export function settleMonthly(
       injuryMonthsLeft: injuryMonthsLeftFor(disciple, turn),
     });
     // 我方出战名单：warParty 指定优先（须可出战），不足自动按最强 3 补齐；缺省全自动选将。
-    const playerRoster = state.disciples.map(toWarEligible);
+    // 岗位/长老占用者不历练，不入会战名册（历练侧 combatReadyDisciples 同口径）。
+    const occupied = jobHolderIds(state);
+    const playerRoster = state.disciples
+      .filter((disciple) => !occupied.has(disciple.id))
+      .map(toWarEligible);
     const rosterById = new Map(playerRoster.map((disciple) => [disciple.id, disciple]));
     const party: WarEligibleDisciple[] = [];
     for (const id of (state.warParty ?? []).slice(0, SECT_WAR_FIGHTERS)) {

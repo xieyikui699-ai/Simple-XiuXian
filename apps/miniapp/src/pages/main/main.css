@@ -79,40 +79,7 @@
   font-size: 22rpx;
 }
 
-/* 底部推进栏 */
-.btn-advance {
-  flex: 1;
-  height: 92rpx;
-  line-height: 92rpx;
-  font-size: 32rpx;
-  letter-spacing: 4rpx;
-  padding: 0;
-  background: var(--accent);
-  color: #fff;
-  border-radius: 18rpx;
-  box-shadow: 0 8rpx 20rpx rgba(110, 61, 26, 0.3);
-}
-
-.btn-advance[disabled="true"] {
-  background: var(--accent);
-  color: #fff;
-  opacity: 0.45;
-  box-shadow: none;
-}
-
-.auto-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4rpx;
-  padding: 0 6rpx;
-}
-
-.auto-label {
-  font-size: 20rpx;
-  color: var(--muted);
-  white-space: nowrap;
-}
+/* 底部推进栏样式见 ../../ui/advance-bar.css（共享组件） */
 
 /* 月结结果 */
 .result-card {
@@ -188,7 +155,40 @@
   border: 2rpx solid var(--line);
 }
 
-/* 外门挖矿滑杆 */
+/* 外门挖矿：标题行（任命按钮）+ 长老行 + 投入滑杆 */
+.card-title-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.card-title-row .card-title {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.card-title-row .btn-mini {
+  flex-shrink: 0;
+}
+
+.elder-line {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-bottom: 14rpx;
+}
+
+.elder-dismiss {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 24rpx;
+  padding: 4rpx 8rpx;
+}
+
 .mining-box {
   padding: 16rpx;
   background: var(--card-2);
@@ -219,9 +219,4 @@
 
 .mining-slider {
   margin: 8rpx 8rpx 0;
-}
-
-.mining-hint {
-  display: block;
-  font-size: 22rpx;
 }

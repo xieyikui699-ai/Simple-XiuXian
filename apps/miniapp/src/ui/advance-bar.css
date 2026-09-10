@@ -1,0 +1,34 @@
+/* 底部推进栏（AdvanceBar 共享组件）：.page-footer 壳在 app.css，此处为栏内元素样式。 */
+.btn-advance {
+  flex: 1;
+  height: 92rpx;
+  line-height: 92rpx;
+  font-size: 32rpx;
+  letter-spacing: 4rpx;
+  padding: 0;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 18rpx;
+  box-shadow: 0 8rpx 20rpx rgba(110, 61, 26, 0.3);
+}
+
+.btn-advance[disabled="true"] {
+  background: var(--accent);
+  color: #fff;
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.auto-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+  padding: 0 6rpx;
+}
+
+.auto-label {
+  font-size: 20rpx;
+  color: var(--muted);
+  white-space: nowrap;
+}

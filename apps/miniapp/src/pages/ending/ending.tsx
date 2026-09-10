@@ -1,6 +1,7 @@
 import { Button, Text, View } from "@tarojs/components";
 import { reLaunch, useDidShow } from "@tarojs/taro";
 import { useGame } from "../../store/use-game";
+import { AdvanceBar } from "../../ui/advance-bar";
 import { formatNumber, formatTurn } from "../../ui/display";
 import { BackBar } from "../../ui/nav";
 import "./ending.css";
@@ -82,6 +83,7 @@ export default function EndingPage() {
           返回首页（可开新局）
         </Button>
       </View>
+      <AdvanceBar />
     </View>
   );
 }

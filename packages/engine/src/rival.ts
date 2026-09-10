@@ -3,6 +3,7 @@
 // 纯函数、确定性：弟子用与玩家同一 generateDisciple 生成器（seed 命名空间 ":rival"），
 // 掷骰一律 sha256（hash.deterministicRoll），禁 Math.random；同 seed 双跑恒等。
 // NPC 不服丹、不研读功法法术（装备即战力）；难度 ×0.8/1.0/1.2 作用于月度真元收益。
+import { treasuresOfTier } from "./catalog.js";
 import { generateDisciple } from "./generation.js";
 import { deterministicRoll } from "./hash.js";
 import {
@@ -11,21 +12,21 @@ import {
   nextRealmStage,
   realmStageForLevel,
 } from "./realms.js";
-import { sectLimitsFor, upgradeRequirementFor } from "./sect.js";
+import { upgradeRequirementFor } from "./sect.js";
 import { currentSuccessRate, monthlyZhenyuanGain } from "./settlement.js";
 import type { Disciple, GameState } from "./state.js";
 
 // ─── 生成参数（设计 §NPC 对手宗门：开局与玩家同为 1 级宗门）──────────────
 
 export const RIVAL_INITIAL_INNER_DISCIPLES = 3;
-/** NPC 亦按内门俸禄口径支付掌门俸禄（经济简算：外门供奉 − 内门俸禄）。 */
+/** NPC 亦按内门俸禄口径支付掌门俸禄（经济简算：无供奉收入、仅支出俸禄）。 */
 export const RIVAL_LEADER_EXTRA_INNER = 1;
 
 /** 难度三档：发展速度倍率（作用于 NPC 月度真元收益与招募频率）。 */
 export const RIVAL_DIFFICULTY_MULTIPLIERS = [0.8, 1, 1.2] as const;
 export type RivalDifficulty = (typeof RIVAL_DIFFICULTY_MULTIPLIERS)[number];
 
-/** 装备按宗门等级自动配最强档（1 级→档 1 / 2 级→档 2 / 3 级→档 3，不出档 4）。 */
+/** 装备按宗门等级自动配品阶（1 级→阶 1 / 2 级→阶 2 / 3 级→阶 3，不出 4 阶）；阶内随机取目录法宝。 */
 export function rivalGearTierForRank(rank: 1 | 2 | 3): 1 | 2 | 3 {
   return Math.min(rank, 3) as 1 | 2 | 3;
 }
@@ -117,28 +118,30 @@ export function createRivalSect(input: {
   return rival;
 }
 
-/** 名册弟子按当前宗门等级重配最强法宝档（升阶后自动换装）。 */
+/** 名册弟子按当前宗门等级重配法宝（升阶后自动换装）：品阶随宗门等级（不出 4 阶），同阶内按弟子 id 确定性取一件。 */
 function equipRivalInner(rival: RivalSect): void {
   const tier = rivalGearTierForRank(rival.sectRank);
+  const pool = treasuresOfTier(tier);
   for (const disciple of rival.disciples) {
-    disciple.equippedGear = { talisman: tier };
+    const roll = deterministicRoll(`${rival.seed}:rival-gear:${disciple.id}`);
+    const treasure = pool[Math.floor((roll / 100) * pool.length)] ?? pool[0];
+    if (treasure) disciple.equippedGear = { talisman: treasure.id };
   }
 }
 
 // ─── 月度运行时（与玩家月结同帧推进；纯函数返回新 RivalSect）────────────
 
 /**
- * NPC 月度推进：① 经济简算（外门供奉 − 内门俸禄）→ ② 内门真元/突破（同玩家公式 ×难度）
+ * NPC 月度推进：① 经济简算（支出内门俸禄，无供奉收入）→ ② 内门真元/突破（同玩家公式 ×难度）
  * → ③ 升阶条件满足自动升阶（并按新等级重配装备；外门总数随等级上限扩容）。
  * NPC 不服丹、不研读、不做衰老坐化（设计 §月度运行时 未列；寿元字段仅作数据扩展位）。
  */
 export function advanceRivalSectMonthly(rivalInput: Readonly<RivalSect>, turn: number): RivalSect {
   const rival = structuredClone(rivalInput) as RivalSect;
 
-  // ① 经济简算：外门供奉 = 外门人数（恒等于等级上限）× 2；内门俸禄 = 内门人数（含掌门）× 10。
+  // ① 经济简算：无供奉收入，仅支出内门俸禄 = 内门人数（含掌门）× 10（灵石钳 0，保证掠夺额度非负）。
   const innerCount = rival.disciples.length;
-  const outerTotal = sectLimitsFor(rival.sectRank).outerLimit;
-  rival.spiritStones += outerTotal * 2 - innerCount * 10;
+  rival.spiritStones = Math.max(0, rival.spiritStones - innerCount * 10);
 
   // ② 内门真元与突破（与玩家同一公式；难度倍率作用于月度真元收益）。
   for (const disciple of rival.disciples) {
@@ -166,7 +169,7 @@ export function advanceRivalSectMonthly(rivalInput: Readonly<RivalSect>, turn: n
     disciple.maxLifespan += lifespanIncreaseForRealmLevel(next.level);
   }
 
-  // ③ 升阶条件满足自动升阶（与玩家同表：筑基+5000 / 金丹×3+30000）。
+  // ③ 升阶条件满足自动升阶（与玩家同表：筑基+5000 / 金丹×1+50000）。
   const requirement = upgradeRequirementFor(rival.sectRank);
   if (requirement) {
     const minRealmLevel = requirement.minRealmLevel;

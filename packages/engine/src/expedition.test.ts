@@ -7,6 +7,7 @@
 // 固定 seed 期望事件序列由 node:crypto sha256 独立对拍预计算写死（hash.test.ts 已证引擎 sha256 与之逐字节一致）。
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { getTreasureById } from "./catalog.js";
 import { createGame } from "./engine.js";
 import {
   type ExpeditionEventKind,
@@ -88,6 +89,33 @@ describe("历练六事件概率分布与伤势分支（expedition）", () => {
     assert.equal(injuryForRoll(99.9999), "none");
   });
 
+  it("奇遇掉落分支：功法书 10% / 法术书 33% / 法宝 57%（2026-09-10 功法由 34% 降至 10%）", () => {
+    // 分支掷骰 deterministicRoll(`${seed}:expedition:${turn}:windfall`)：
+    // [0,10) 功法书 / [10,43) 法术书 / [43,100) 法宝（品阶 1–2 六种随机其一）。
+    const opponent = makeDisciple({ id: "opp-1" });
+    const seen = { gongfa_book: 0, spell_book: 0, gear: 0 };
+    for (let i = 0; i < 400; i++) {
+      const seed = `windfall-branch-${i}`;
+      if (expeditionEventForRoll(deterministicRoll(`${seed}:expedition:2`)) !== "windfall")
+        continue;
+      const branch = deterministicRoll(`${seed}:expedition:2:windfall`);
+      const expected = branch < 10 ? "gongfa_book" : branch < 43 ? "spell_book" : "gear";
+      if (seen[expected] > 0) continue;
+      const game = createGame({ seed, sectName: "接线宗" });
+      const result = settleExpedition(game, {
+        turn: 2,
+        atWar: false,
+        incomePct: 0,
+        opponentProvider: () => opponent,
+      });
+      assert.ok(result.reward);
+      assert.equal(result.reward.type, expected, `seed=${seed} branch=${branch}`);
+      seen[expected] += 1;
+      if (seen.gongfa_book > 0 && seen.spell_book > 0 && seen.gear > 0) return;
+    }
+    throw new Error("test_setup_windfall_branch_seed_not_found");
+  });
+
   it("固定 seed 事件序列与设计概率表一致（seed=expedition-golden，1–12 月）", () => {
     const game = createGame({ seed: GOLDEN_SEED_A, sectName: "历练宗" });
     const opponent = makeDisciple({ id: "opp-1" });
@@ -132,7 +160,9 @@ describe("历练六事件概率分布与伤势分支（expedition）", () => {
         windfall.reward.type === "gear",
     );
     if (windfall.reward.type === "gear") {
-      assert.ok(windfall.reward.tier === 1 || windfall.reward.tier === 2);
+      // 掉落池：目录十件中品阶 1–2 的六种法宝随机其一。
+      const dropped = getTreasureById(windfall.reward.treasureId);
+      assert.ok(dropped && dropped.tier <= 2);
     }
     const pill = settleExpedition(game, {
       turn: 14,
@@ -320,8 +350,8 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
       assert.ok(
         result.expedition.spiritStonesDelta >= 50 && result.expedition.spiritStonesDelta <= 150,
       );
-      // 外门供奉 200 − 俸禄 30 = +170，另加历练收获。
-      assert.equal(state.spiritStones, 2000 + 170 + result.expedition.spiritStonesDelta);
+      // 供奉已删除（新局未分岗无挖矿收入）：仅 − 俸禄 30，另加历练收获。
+      assert.equal(state.spiritStones, 2000 - 30 + result.expedition.spiritStonesDelta);
       assert.ok(
         state.chronicle.some((entry) => entry.kind === "normal" && entry.text.includes("外出历练")),
       );
@@ -423,7 +453,7 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
     assert.equal(discipleOf(after2, "d-1").injury?.untilTurn, 5);
   });
 
-  it("奇遇掉落接线：书入藏经阁、装备（档 1–2）与丹药入仓库", () => {
+  it("奇遇掉落接线：书入藏经阁、法宝（品阶 1–2 六种）与丹药入仓库", () => {
     for (let i = 0; i < 400; i++) {
       const seed = `wire-windfall-${i}`;
       if (eventAt(seed, 2) !== "windfall") continue;
@@ -436,10 +466,11 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
       } else if (reward.type === "spell_book") {
         assert.ok(state.library?.spellIds.includes(reward.spellId));
       } else if (reward.type === "gear") {
-        assert.ok(reward.tier === 1 || reward.tier === 2);
+        const dropped = getTreasureById(reward.treasureId);
+        assert.ok(dropped && dropped.tier <= 2);
         assert.ok(
           state.warehouse?.gear.some(
-            (item) => item.slot === reward.slot && item.tier === reward.tier,
+            (item) => item.slot === reward.slot && item.treasureId === reward.treasureId,
           ),
         );
       } else {
@@ -473,7 +504,7 @@ describe("月结历练接线与伤势恢复（E03-F02）", () => {
   it("资源危机月停摆：不触发遭遇事件、声望不增", () => {
     const game = createGame({ seed: "wire-crisis", sectName: "接线宗" });
     const poor = structuredClone(game);
-    // 外门恒满员供奉 200；内门膨胀到 53 人（俸禄 530 > 供奉 200）且灵石归零 → 危机。
+    // 无供奉收入（新局未分岗无挖矿）：内门膨胀到 53 人（俸禄 530）且灵石归零 → 危机。
     poor.spiritStones = 0;
     const template = poor.disciples[0];
     assert.ok(template);

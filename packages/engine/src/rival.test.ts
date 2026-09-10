@@ -99,7 +99,7 @@ describe("NPC 宗门生成（rival）", () => {
     assert.deepEqual(first, second);
   });
 
-  it("装备按宗门等级自动配档：1→档1 / 2→档2 / 3→档3（不出档 4）", () => {
+  it("装备按宗门等级自动配品阶：1→阶1 / 2→阶2 / 3→阶3（不出阶 4）", () => {
     assert.equal(rivalGearTierForRank(1), 1);
     assert.equal(rivalGearTierForRank(2), 2);
     assert.equal(rivalGearTierForRank(3), 3);
@@ -135,8 +135,8 @@ describe("NPC 月度运行时（rival，确定性）", () => {
     leader.realmLevel = 4;
     const advanced = advanceRivalSectMonthly(staged, 2);
     assert.equal(advanced.sectRank, 2);
-    // 经济：外门供奉 100×2 − 内门俸禄 4×10 = +160；升阶 −5,000。
-    assert.equal(advanced.spiritStones, 6000 + 160 - 5000);
+    // 经济：供奉已删除，仅支出内门俸禄 4×10 = −40；升阶 −5,000。
+    assert.equal(advanced.spiritStones, 6000 - 40 - 5000);
   });
 
   it("突破尝试后真元清零（成败皆清，同玩家规则）", () => {

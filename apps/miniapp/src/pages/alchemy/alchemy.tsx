@@ -1,32 +1,24 @@
 import {
   CRAFT_JOB_KINDS,
   GEAR_COST_PER_OUTER_MONTH,
-  GEAR_SLOT_DISPLAY_NAMES,
-  GEAR_SLOT_KEYS,
-  GEAR_TIERS,
   PILL_COST_PER_OUTER_MONTH,
+  TREASURES,
   WORKSHOP_MASTER_LIMIT,
   effectiveOuterJobsOf,
   estimateCraftMonths,
   jobsOf,
-  maxForgeTierForRank,
   sectLimitsFor,
+  treasureEffectDescription,
   workshopPauseReason,
   workshopSpeedMultiplier,
   workshopTaskTotalPoints,
 } from "@simple-xiuxian/engine";
-import type {
-  CraftJobKind,
-  Disciple,
-  GameState,
-  GearSlot,
-  GearTier,
-  WorkshopTask,
-} from "@simple-xiuxian/engine";
+import type { CraftJobKind, Disciple, GameState, WorkshopTask } from "@simple-xiuxian/engine";
 import { Button, Slider, Text, View } from "@tarojs/components";
 import { reLaunch, useDidShow } from "@tarojs/taro";
 import { useState } from "react";
 import { getGameStore, useGame } from "../../store/use-game";
+import { AdvanceBar } from "../../ui/advance-bar";
 import { formatNumber, formatTurn } from "../../ui/display";
 import { BackBar } from "../../ui/nav";
 import { DisciplePicker } from "../../ui/picker";
@@ -57,8 +49,6 @@ export default function AlchemyPage() {
   const store = getGameStore();
   const { state, errorMessage } = useGame();
   const [assigning, setAssigning] = useState<CraftJobKind | null>(null);
-  const [forgeSlot, setForgeSlot] = useState<GearSlot>("talisman");
-  const [forgeTier, setForgeTier] = useState<GearTier>(1);
 
   useDidShow(() => {
     if (!state) reLaunch({ url: "/pages/index/index" });
@@ -88,8 +78,6 @@ export default function AlchemyPage() {
     const staff = workshop.assignedOuter;
     const monthlyCost =
       staff * (kind === "pill" ? PILL_COST_PER_OUTER_MONTH : GEAR_COST_PER_OUTER_MONTH);
-    const selectedSlot = task?.kind === "gear" ? task.slot : forgeSlot;
-    const selectedTier = task?.kind === "gear" ? task.tier : forgeTier;
 
     return (
       <View key={kind} className="card">
@@ -119,9 +107,10 @@ export default function AlchemyPage() {
         )}
         {assigning === kind && (
           <DisciplePicker
-            title={`任命${WORKSHOP_ROLE_NAMES[kind]}（无职成年弟子，任内不战斗不修炼）`}
+            title={`任命${WORKSHOP_ROLE_NAMES[kind]}（无职成年弟子，任内不历练、照常修炼）`}
             hint="已被他房或长老占用的弟子不可再任。"
             disciples={masterCandidates(state)}
+            onCancel={() => setAssigning(null)}
             onPick={(discipleId) => {
               store.assignJob(kind, discipleId);
               setAssigning(null);
@@ -165,47 +154,18 @@ export default function AlchemyPage() {
         </View>
 
         {kind === "pill" && (
-          <View className="craft-panel">
-            <Text className="muted">延寿丹（寿命 +10 年）</Text>
+          <View className="craft-panel craft-panel-row">
+            <Text className="muted">延寿丹（寿命 +30 年）</Text>
             <Text className="muted">聚灵丹（12 月真元 ×1.5）</Text>
           </View>
         )}
-
         {kind === "gear" && (
           <View className="craft-panel">
-            <View className="forge-options">
-              {GEAR_SLOT_KEYS.map((slot) => (
-                <Text
-                  key={slot}
-                  className={`forge-chip${selectedSlot === slot ? " forge-chip-active" : ""}`}
-                  onClick={() => {
-                    setForgeSlot(slot);
-                    if (!ended) store.setGearTask(slot, selectedTier);
-                  }}
-                >
-                  {GEAR_SLOT_DISPLAY_NAMES[slot]}
-                </Text>
-              ))}
-            </View>
-            <View className="forge-options">
-              {GEAR_TIERS.filter((tier) => tier <= maxForgeTierForRank(state.sectRank)).map(
-                (tier) => (
-                  <Text
-                    key={tier}
-                    className={`forge-chip${selectedTier === tier ? " forge-chip-active" : ""}`}
-                    onClick={() => {
-                      setForgeTier(tier);
-                      if (!ended) store.setGearTask(selectedSlot, tier);
-                    }}
-                  >
-                    档{tier}
-                  </Text>
-                ),
-              )}
-            </View>
+            <Text className="muted">出炉随机：{TREASURES.length} 种法宝其一（效果各不同）</Text>
             <Text className="muted">
-              本宗可炼至档{maxForgeTierForRank(state.sectRank)}
-              ；投入外门弟子即自动开工，点选图纸换目标（进度作废）。
+              {TREASURES.map(
+                (treasure) => `${treasure.name}（${treasureEffectDescription(treasure)}）`,
+              ).join("、")}
             </Text>
           </View>
         )}
@@ -230,6 +190,7 @@ export default function AlchemyPage() {
         </View>
         {CRAFT_JOB_KINDS.map(renderWorkshop)}
       </View>
+      <AdvanceBar />
     </View>
   );
 }

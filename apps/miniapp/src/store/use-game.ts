@@ -1,9 +1,10 @@
 import type { GameState } from "@simple-xiuxian/engine";
 import { getStorageSync, removeStorageSync, setStorageSync } from "@tarojs/taro";
-// UI 层绑定：React 订阅 hook + 自动推进定时器（1 秒 1 月，可暂停）+ 单格自动档持久化。
+// UI 层绑定：React 订阅 hook + 单格自动档持久化。
+// 自动推进计时器见 ./auto-advance（全局单例，跨页共享）。
 // 自动档：每次会话状态变化即写（SAVE_KEY）；终局（state.ending）即删档——存档只保留可续的局。
 // 启动时清除历史版本多格存档的残留 key（简化版前格式，不做迁移）。
-import { useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { type AutoSaveData, SAVE_KEY, parseAutoSave, serializeAutoSave } from "./auto-save";
 import { type GameSnapshot, type GameStore, createGameStore } from "./game-store";
 
@@ -87,18 +88,4 @@ export function getGameStore(): GameStore {
 export function useGame(): GameSnapshot {
   const store = getGameStore();
   return useSyncExternalStore(store.subscribe, store.getState);
-}
-
-/** 自动推进：开启期间每 intervalMs 毫秒推进一月；关闭或组件卸载即暂停。 */
-export function useAutoAdvance(enabled: boolean, intervalMs = 1000): void {
-  const store = getGameStore();
-  useEffect(() => {
-    if (!enabled) return;
-    const timer = setInterval(() => {
-      store.autoTick();
-    }, intervalMs);
-    return () => {
-      clearInterval(timer);
-    };
-  }, [enabled, intervalMs, store]);
 }

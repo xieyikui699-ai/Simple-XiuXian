@@ -174,21 +174,21 @@ body {
   border: 2rpx solid var(--line);
 }
 
-/* 境界等级着色：练气青 / 筑基蓝 / 金丹紫 / 元婴金。 */
+/* 境界等级着色：练气灰褐 / 筑基暗绿 / 金丹亮绿 / 元婴亮蓝。 */
 .tone-qi {
-  color: #3c7a5a;
+  color: #8a7a68;
 }
 
 .tone-foundation {
-  color: #2f6f9f;
+  color: #2f6b3f;
 }
 
 .tone-golden {
-  color: #7a4f9f;
+  color: #1fae4e;
 }
 
 .tone-nascent {
-  color: #b8860b;
+  color: #1e90ff;
 }
 
 .error-line {

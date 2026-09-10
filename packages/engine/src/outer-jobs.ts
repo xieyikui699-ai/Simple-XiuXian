@@ -2,7 +2,7 @@ import { jobsOf } from "./production.js";
 import { sectLimitsFor } from "./sect.js";
 // 外门分工（挖矿/练气）：外门恒按宗门等级上限满员（100/300/500），玩家按人数分岗——
 // 丹房/器坊投入走 production.setWorkshopStaff（车间 assignedOuter），本模块管挖矿与练气：
-// - 挖矿：每名在岗外门弟子每月上缴灵石（月结第 ① 步并入收入，参与危机判定；资源长老只加成供奉不加成挖矿）。
+// - 挖矿：每名在岗外门弟子每月上缴灵石（月结第 ① 步并入收入，参与危机判定；灵矿长老按境界加成上缴）。
 // - 练气：递补入内门时，按在岗练气人数给新弟子携带初始真元（月结第 ⑧ 步）。
 // 主页「外门 X/Y」的 X = 四类在岗合计、Y = 外门上限；外门总数与分工调整在弟子殿分工面板。
 import { CHRONICLE_LIMIT } from "./settlement.js";
@@ -21,7 +21,7 @@ export const OUTER_QI_ZHENYUAN_PER_WORKER = 20;
 
 export type OuterJobsInput = Partial<Pick<OuterJobsState, "mining" | "qi">>;
 
-/** 外门分工配置（旧档缺省/异常数据归零 = 全员供奉）。 */
+/** 外门分工配置（旧档缺省/异常数据归零 = 未分岗）。 */
 export function outerJobsOf(state: Readonly<GameState>): OuterJobsState {
   const raw = state.outerJobs;
   return {
@@ -83,7 +83,7 @@ export function assignOuterJobs(
     state.chronicle.unshift({
       turn: state.currentTurn,
       kind: "normal",
-      text: `外门分工调整：挖矿 ${jobs.mining} 人、练气 ${jobs.qi} 人，其余供奉宗门。`,
+      text: `外门分工调整：挖矿 ${jobs.mining} 人、练气 ${jobs.qi} 人，其余未分岗。`,
     });
     if (state.chronicle.length > CHRONICLE_LIMIT) state.chronicle.length = CHRONICLE_LIMIT;
   }

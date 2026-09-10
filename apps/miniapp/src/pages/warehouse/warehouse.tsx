@@ -5,22 +5,28 @@ import {
   GEAR_SLOT_KEYS,
   PILLS,
   SPELLS,
+  TREASURES,
   type Technique,
+  type Treasure,
   getSpellById,
   getTechniqueById,
+  getTreasureById,
+  realmStageForLevel,
+  treasureEffectDescription,
 } from "@simple-xiuxian/engine";
-import type { Disciple, GameState, GearSlot, GearTier } from "@simple-xiuxian/engine";
+import type { Disciple, GameState, GearSlot } from "@simple-xiuxian/engine";
 import { Button, Text, View } from "@tarojs/components";
 import { reLaunch, useDidShow } from "@tarojs/taro";
 import { useState } from "react";
 import { getGameStore, useGame } from "../../store/use-game";
-import { formatNumber, formatTurn } from "../../ui/display";
+import { AdvanceBar } from "../../ui/advance-bar";
+import { formatNumber, formatTurn, formatZhenyuanRequirement } from "../../ui/display";
 import { BackBar } from "../../ui/nav";
 import { DisciplePicker } from "../../ui/picker";
 import "./warehouse.css";
 
 type Usage =
-  | { kind: "wear"; slot: GearSlot; tier: GearTier }
+  | { kind: "wear"; slot: GearSlot; treasureId: string }
   | { kind: "pill"; pillId: string }
   | { kind: "learn"; artId: string }
   | null;
@@ -96,15 +102,16 @@ export default function WarehousePage() {
   const library = state.library ?? { techniqueIds: [], spellIds: [] };
 
   const gearRows = GEAR_SLOT_KEYS.flatMap((slot) => {
-    const tiers = warehouse.gear
-      .filter((entry) => entry.slot === slot)
-      .reduce((counts, entry) => {
-        counts.set(entry.tier, (counts.get(entry.tier) ?? 0) + 1);
-        return counts;
-      }, new Map<GearTier, number>());
-    return [...tiers.entries()]
-      .sort((a, b) => b[0] - a[0])
-      .map(([tier, count]) => ({ slot, tier, count }));
+    const counts = new Map<string, number>();
+    for (const entry of warehouse.gear) {
+      if (entry.slot !== slot) continue;
+      counts.set(entry.treasureId, (counts.get(entry.treasureId) ?? 0) + 1);
+    }
+    return TREASURES.filter((treasure) => counts.has(treasure.id)).map((treasure) => ({
+      slot,
+      treasure,
+      count: counts.get(treasure.id) ?? 0,
+    }));
   });
 
   const pickerDisciples = usableInner(state);
@@ -112,13 +119,26 @@ export default function WarehousePage() {
   const renderPicker = () => {
     if (!usage) return null;
     if (usage.kind === "wear") {
+      const treasure: Treasure | undefined = getTreasureById(usage.treasureId);
       return (
         <DisciplePicker
-          title={`穿戴${GEAR_SLOT_DISPLAY_NAMES[usage.slot]}（档${usage.tier}）`}
-          hint="同槽已穿装备将卸下回仓。"
+          title={`穿戴${GEAR_SLOT_DISPLAY_NAMES[usage.slot]}「${treasure?.name ?? usage.treasureId}」`}
+          hint={`${treasure ? `${treasureEffectDescription(treasure)}。` : ""}同槽已穿法宝将卸下回仓。`}
           disciples={pickerDisciples}
+          subText={(disciple) => {
+            const worn = GEAR_SLOT_KEYS.flatMap((slot) => {
+              const id = disciple.equippedGear?.[slot];
+              if (id === undefined) return [];
+              const treasure = getTreasureById(id);
+              return [
+                `「${treasure?.name ?? id}」${treasure ? treasureEffectDescription(treasure) : ""}`,
+              ];
+            });
+            return worn.length > 0 ? `已穿 ${worn.join("、")}` : "未穿戴法宝";
+          }}
+          onCancel={() => setUsage(null)}
           onPick={(discipleId) => {
-            store.wear(discipleId, usage.slot, usage.tier);
+            store.wear(discipleId, usage.slot, usage.treasureId);
             setUsage(null);
           }}
         />
@@ -130,9 +150,29 @@ export default function WarehousePage() {
         <DisciplePicker
           title={`服用${pill?.name ?? usage.pillId}`}
           hint={
-            pill?.effect.zhenyuanBuff !== undefined ? "聚灵丹同弟子不叠加、只刷新时长。" : undefined
+            pill?.effect.zhenyuanBuff !== undefined
+              ? "聚灵丹同弟子倍率不叠加、时长累加。"
+              : undefined
+          }
+          subText={
+            pill?.effect.lifespanFlat !== undefined
+              ? (disciple) => `寿命 ${disciple.age}/${disciple.maxLifespan} 岁`
+              : pill?.effect.zhenyuanBuff !== undefined
+                ? (disciple) => {
+                    const zhenyuanText = `真元 ${disciple.zhenyuan}/${formatZhenyuanRequirement(
+                      realmStageForLevel(disciple.realmLevel).requiredZhenyuan,
+                    )}`;
+                    const until = disciple.spiritFocusUntilTurn;
+                    if (until === undefined || until < state.currentTurn) return zhenyuanText;
+                    const remaining = until - state.currentTurn;
+                    return remaining > 0
+                      ? `${zhenyuanText} · 聚灵丹生效中（剩 ${remaining} 个月）`
+                      : `${zhenyuanText} · 聚灵丹生效中（本月到期）`;
+                  }
+                : undefined
           }
           disciples={pickerDisciples}
+          onCancel={() => setUsage(null)}
           onPick={(discipleId) => {
             store.takePill(discipleId, usage.pillId);
             setUsage(null);
@@ -144,7 +184,7 @@ export default function WarehousePage() {
     return (
       <DisciplePicker
         title={`研读《${getTechniqueById(usage.artId)?.name ?? spell?.name ?? usage.artId}》`}
-        hint="功法限修 1 门、法术限修 2 门。"
+        hint="功法限修 1 门（研读后书册消耗）、法术限修 2 门（不耗书）。"
         disciples={pickerDisciples}
         disabledReason={(disciple) => {
           if (getSpellById(usage.artId)) {
@@ -152,10 +192,16 @@ export default function WarehousePage() {
             if (known.includes(usage.artId)) return "已在修此法术";
             if (known.length >= 2) return "法术已满 2 门";
           } else if (disciple.techniqueId) {
-            return "已有功法在修";
+            const tech = getTechniqueById(disciple.techniqueId);
+            return `已修《${tech?.name ?? disciple.techniqueId}》`;
           }
           return "";
         }}
+        subText={(disciple) => {
+          const stageName = realmStageForLevel(disciple.realmLevel);
+          return `真元 ${disciple.zhenyuan}/${formatZhenyuanRequirement(stageName.requiredZhenyuan)}`;
+        }}
+        onCancel={() => setUsage(null)}
         onPick={(discipleId) => {
           store.study(discipleId, usage.artId);
           setUsage(null);
@@ -186,14 +232,19 @@ export default function WarehousePage() {
             <Text className="muted">仓库暂无装备。历练掉落与器坊炼制可得。</Text>
           )}
           {gearRows.map((row) => (
-            <View key={`${row.slot}-${row.tier}`} className="stock-row">
-              <Text>
-                {GEAR_SLOT_DISPLAY_NAMES[row.slot]} · 档{row.tier} ×{row.count}
-              </Text>
+            <View key={`${row.slot}-${row.treasure.id}`} className="stock-row">
+              <View className="stock-info">
+                <Text>
+                  {GEAR_SLOT_DISPLAY_NAMES[row.slot]}「{row.treasure.name}」 ×{row.count}
+                </Text>
+                <Text className="muted">{treasureEffectDescription(row.treasure)}</Text>
+              </View>
               <Button
                 className="btn-mini"
                 disabled={ended}
-                onClick={() => setUsage({ kind: "wear", slot: row.slot, tier: row.tier })}
+                onClick={() =>
+                  setUsage({ kind: "wear", slot: row.slot, treasureId: row.treasure.id })
+                }
               >
                 穿戴
               </Button>
@@ -203,7 +254,9 @@ export default function WarehousePage() {
 
         <View className="card">
           <View className="card-title">丹药</View>
-          {warehouse.pills.length === 0 && <Text className="muted">仓库暂无丹药。</Text>}
+          {warehouse.pills.length === 0 && (
+            <Text className="muted">仓库暂无丹药。丹房炼制可得。</Text>
+          )}
           {warehouse.pills.map((entry) => {
             const pill = PILLS.find((item) => item.id === entry.pillId);
             return (
@@ -234,8 +287,12 @@ export default function WarehousePage() {
           <View className="card-title">
             藏经阁（功法 {library.techniqueIds.length} / 法术 {library.spellIds.length}）
           </View>
+          <Text className="muted">
+            书册来源：每月历练奇遇偶得，自动送入藏经阁；功法研读后书册消耗（一书仅一名弟子可研），
+            法术不耗书、可反复研读；法术亦可由弟子突破顿悟直接习得。
+          </Text>
           {library.techniqueIds.length === 0 && library.spellIds.length === 0 && (
-            <Text className="muted">藏经阁暂无藏书。历练奇遇可入功法书/法术书。</Text>
+            <Text className="muted">藏经阁暂无藏书，先等历练奇遇入阁。</Text>
           )}
           {library.techniqueIds.map((artId) => {
             const technique = getTechniqueById(artId);
@@ -274,6 +331,7 @@ export default function WarehousePage() {
 
         {renderPicker()}
       </View>
+      <AdvanceBar />
     </View>
   );
 }

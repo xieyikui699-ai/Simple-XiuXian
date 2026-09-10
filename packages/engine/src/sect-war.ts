@@ -7,6 +7,7 @@ import { injuryMonthsFor, runBattle } from "./battle.js";
 import { getSpellById } from "./catalog.js";
 import type { Spell } from "./catalog.js";
 import { buildCombatProfile } from "./combat-profile.js";
+import { realmStageForLevel } from "./realms.js";
 import type { Disciple } from "./state.js";
 
 // ─── 会战常量（设计 §两宗对抗·会战结果）─────────────────────────────────
@@ -23,7 +24,7 @@ export const WAR_MORALE_DELTA = 5;
 /** 会战参战弟子：内门弟子 + 当月剩余禁战月数（由伤势模型换算，0/缺省 = 可出战）。 */
 export type WarEligibleDisciple = Disciple & { injuryMonthsLeft?: number };
 
-/** 会战参战资格：无未愈伤势（injuryMonthsLeft > 0 = 仍在禁战期；名册全员内门，外门只是数字不参战）。 */
+/** 会战参战资格：无未愈伤势（injuryMonthsLeft > 0 = 仍在禁战期；名册全员内门，外门只是数字不参战；岗位/长老占用者由月结⑥在名册层面排除）。 */
 export function isWarEligible(disciple: WarEligibleDisciple): boolean {
   return !(disciple.injuryMonthsLeft && disciple.injuryMonthsLeft > 0);
 }
@@ -117,6 +118,7 @@ function toCombatant(disciple: WarEligibleDisciple): BattleFighter {
     rootElements: disciple.rootElements,
     spells,
     plan: spells.map((spell) => ({ kind: "spell" as const, spellId: spell.id })),
+    realm: realmStageForLevel(disciple.realmLevel).name,
   };
 }
 

@@ -12,15 +12,18 @@ import {
   learnArt,
   listRecruitCandidates,
   recruitDisciple,
+  removeElder,
   upgradeSect,
   usePill,
   wearGear,
 } from "./engine.js";
+import { combatReadyDisciples } from "./expedition.js";
 import { deterministicRoll } from "./hash.js";
+import { assignOuterJobs } from "./outer-jobs.js";
 import { assignWorkshopJob } from "./production.js";
 import { realmStageForLevel } from "./realms.js";
+import { declareWar } from "./rival.js";
 import { ROOT_MULTIPLIERS } from "./roots.js";
-import { OUTER_INCOME_PER_DISCIPLE, sectLimitsFor } from "./sect.js";
 import {
   BATTLE_LOG_BYTE_BUDGET,
   BATTLE_LOG_LIMIT,
@@ -28,11 +31,13 @@ import {
   ZHENYUAN_BASE,
   ZHENYUAN_COMPREHENSION_COEFF,
   currentSuccessRate,
+  mineElderBonusPct,
   monthlyZhenyuanGain,
   prependBattleReports,
   settleMonthly,
 } from "./settlement.js";
 import type { GameState, SettlementResult } from "./state.js";
+import { migrateGameState } from "./state.js";
 import { talentsAttributeFlat, talentsZhenyuanPct } from "./talents.js";
 
 function newGame(seed = "slice-seed-1"): GameState {
@@ -83,20 +88,18 @@ describe("开局", () => {
 });
 
 describe("月度结算", () => {
-  it("12 月推进：回合 13、月结收支 = 灵脉产出 − 俸禄 + 历练收获、年度衰老 +1 岁", () => {
+  it("12 月推进：回合 13、月结收支 = 挖矿上缴 − 俸禄 + 历练收获、年度衰老 +1 岁", () => {
     let state = newGame();
     const results: SettlementResult[] = [];
     for (let month = 0; month < 12; month++) {
-      // 经济：月入 = 外门供奉（外门恒按等级上限满员 × 人均 2），俸禄 = 名册 ×10；历练另计。
+      // 经济：月入 = 挖矿上缴（新局未分岗 = 0），俸禄 = 名册 ×10；历练另计。
       const innerCount = state.disciples.length;
       const settled = settleMonthly(state);
       state = settled.state;
       results.push(settled.result);
       const expected = settled.result.crisis
         ? 0
-        : sectLimitsFor(state.sectRank).outerLimit * OUTER_INCOME_PER_DISCIPLE -
-          innerCount * 10 +
-          (settled.result.expedition?.spiritStonesDelta ?? 0);
+        : -innerCount * 10 + (settled.result.expedition?.spiritStonesDelta ?? 0);
       assert.equal(settled.result.spiritStonesDelta, expected, `month ${month + 1}`);
     }
     assert.equal(state.currentTurn, 13);
@@ -132,14 +135,14 @@ describe("月度结算", () => {
     assert.equal(result.expedition?.event, "danger");
     assert.equal(result.moraleDelta, 1);
     assert.equal(result.prestigeDelta, 0);
-    // 灵脉产出 200，俸禄 30 → +170（危险-安全月历练无灵石入账）。
-    assert.equal(after.spiritStones, 2000 + 170 + 0);
+    // 供奉已删除（未分岗无挖矿收入），俸禄 30 → −30（危险-安全月历练无灵石入账）。
+    assert.equal(after.spiritStones, 2000 - 30 + 0);
     assert.ok(after.chronicle.some((entry) => entry.text.includes("历练")));
   });
 
   it("资源危机：当月停摆（无历练）、收支勾销、士气 −3", () => {
     const state = structuredClone(newGame());
-    // 灵脉产出 200；把名册膨胀到 53 人（俸禄 530 > 产出 200）且灵石归零 → 危机。
+    // 无供奉收入（未分岗无挖矿）；把名册膨胀到 53 人（俸禄 530）且灵石归零 → 危机。
     state.spiritStones = 0;
     const template = state.disciples[0];
     assert.ok(template);
@@ -392,14 +395,12 @@ describe("管理命令", () => {
     const { state: rank2 } = upgradeSect(state);
     assert.equal(rank2.sectRank, 2);
     assert.equal(rank2.spiritStones, 5000);
-    // 2→3 需金丹弟子 ≥3（先补足灵石，避免触发资源检查）
+    // 2→3 需金丹弟子 1 名 + 灵石 50,000（先补足灵石，避免触发资源检查）
     const rank2Prepared = structuredClone(rank2);
-    rank2Prepared.spiritStones = 40000;
+    rank2Prepared.spiritStones = 51000;
     assert.throws(() => upgradeSect(rank2Prepared), /sect_upgrade_golden_core_not_met/);
-    for (const id of ["d-1", "d-2", "d-3"]) {
-      discipleOf(rank2Prepared, id).realmLevel = 7;
-      discipleOf(rank2Prepared, id).realm = realmStageForLevel(7).realm;
-    }
+    discipleOf(rank2Prepared, "d-1").realmLevel = 7;
+    discipleOf(rank2Prepared, "d-1").realm = realmStageForLevel(7).realm;
     const { state: rank3 } = upgradeSect(rank2Prepared);
     assert.equal(rank3.sectRank, 3);
     assert.throws(() => upgradeSect(rank3), /sect_rank_maxed/);
@@ -444,6 +445,18 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
     assert.throws(() => learnArt(state, "d-2", "art-none"), /art_not_found/);
   });
 
+  it("研读功法消耗书册：书自藏经阁消失，他人不可再研；法术不耗书", () => {
+    let state = gameWithLibrary();
+    state = learnArt(state, "d-1", "tech-hunyuan").state;
+    // 混元功书册消耗，养气诀仍在阁。
+    assert.deepEqual(state.library?.techniqueIds, ["tech-yangqi"]);
+    // 已耗的书他人研读被拒（历练奇遇可再得，故非「已修」类错误）。
+    assert.throws(() => learnArt(state, "d-2", "tech-hunyuan"), /art_not_in_library/);
+    // 法术研读不耗书：三门法术书仍在阁。
+    state = learnArt(state, "d-2", "spell-jinfeng").state;
+    assert.deepEqual(state.library?.spellIds, ["spell-jinfeng", "spell-hanbing", "spell-yanbao"]);
+  });
+
   it("功法月结生效：混元功真元 +15%、五维 +2 计入月度真元", () => {
     const state = gameWithLibrary();
     state.morale = 50; // 中段士气：避开 ±10% 阈值干扰，专注功法增益。
@@ -462,7 +475,7 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
     assert.ok(monthlyZhenyuanGain(after, learned) > before);
   });
 
-  it("服用聚灵丹：12 月内真元 ×1.5、不叠加只刷新；延寿丹最大寿命 +10", () => {
+  it("服用聚灵丹：12 月内真元 ×1.5、时长累加倍率不叠加；延寿丹最大寿命 +30", () => {
     const state = newGame();
     state.warehouse = {
       gear: [],
@@ -479,17 +492,26 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
       { pillId: "pill-juling", count: 2 },
       { pillId: "pill-yanshou", count: 1 },
     ]);
-    // 推进一月后重复服用：刷新时长（turn 2 + 12 = 14），不叠加为 ×2.25。
+    // 推进一月后重复服用：时长在剩余月数上累加（13 + 12 = 25），倍率仍 ×1.5 不叠加。
     after = settleMonthly(after).state;
+    after = usePill(after, "d-1", "pill-juling").state;
+    assert.equal(discipleOf(after, "d-1").spiritFocusUntilTurn, 1 + 12 + 12);
+    const noBuff = structuredClone(after);
+    Reflect.deleteProperty(discipleOf(noBuff, "d-1"), "spiritFocusUntilTurn");
+    assert.equal(
+      monthlyZhenyuanGain(after, discipleOf(after, "d-1")),
+      Math.round(monthlyZhenyuanGain(noBuff, discipleOf(noBuff, "d-1")) * 1.5),
+    );
+    // 过期后服用：自当前回月起算（turn 2 + 12 = 14）。
+    discipleOf(after, "d-1").spiritFocusUntilTurn = 2;
     after = usePill(after, "d-1", "pill-juling").state;
     assert.equal(discipleOf(after, "d-1").spiritFocusUntilTurn, 2 + 12);
     // 仓库耗尽后拒绝。
-    after = usePill(after, "d-1", "pill-juling").state;
     assert.throws(() => usePill(after, "d-1", "pill-juling"), /pill_not_in_warehouse/);
-    // 延寿丹直接 +10 年（写入 maxLifespan）。
+    // 延寿丹直接 +30 年（写入 maxLifespan）。
     const lifespanBefore = discipleOf(after, "d-2").maxLifespan;
     after = usePill(after, "d-2", "pill-yanshou").state;
-    assert.equal(discipleOf(after, "d-2").maxLifespan, lifespanBefore + 10);
+    assert.equal(discipleOf(after, "d-2").maxLifespan, lifespanBefore + 30);
   });
 
   it("聚灵丹增益到期自动失效", () => {
@@ -510,38 +532,115 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
     assert.equal(monthlyZhenyuanGain(after2, discipleOf(after2, "d-1")), base);
   });
 
-  it("穿戴法宝：仓库取出、旧法宝卸下回仓、派生法威 +档位加成", () => {
+  it("穿戴法宝：仓库取出、旧法宝卸下回仓、单项效果进入派生（五维/先攻/防御）", () => {
+    const state = newGame();
+    state.warehouse = {
+      gear: [
+        { slot: "talisman", treasureId: "gear-qingyunzhu" },
+        { slot: "talisman", treasureId: "gear-yufenghuan" },
+        { slot: "talisman", treasureId: "gear-huangquanfan" },
+      ],
+      pills: [],
+    };
+    const baseProfile = buildCombatProfile(discipleOf(state, "d-1"));
+    // 青云珠：有效五维魂力 +5（法威随等级公式重算，非平加）。
+    const { state: after1 } = wearGear(state, "d-1", "talisman", "gear-qingyunzhu");
+    assert.deepEqual(discipleOf(after1, "d-1").equippedGear, { talisman: "gear-qingyunzhu" });
+    assert.deepEqual(after1.warehouse?.gear, [
+      { slot: "talisman", treasureId: "gear-yufenghuan" },
+      { slot: "talisman", treasureId: "gear-huangquanfan" },
+    ]);
+    const profile1 = buildCombatProfile(discipleOf(after1, "d-1"));
+    assert.equal(profile1.breakdown.attributes.gearFlat.soulPower, 5);
+    assert.equal(
+      profile1.breakdown.attributes.effective.soulPower,
+      Math.min(100, baseProfile.breakdown.attributes.effective.soulPower + 5),
+    );
+    assert.ok(profile1.magicPower > baseProfile.magicPower);
+    // 替换：御风环（身法 +6）上身、青云珠回仓，先攻 +6。
+    const { state: after2 } = wearGear(after1, "d-1", "talisman", "gear-yufenghuan");
+    assert.deepEqual(discipleOf(after2, "d-1").equippedGear, { talisman: "gear-yufenghuan" });
+    // 卸下回仓的青云珠追加在仓库末尾。
+    assert.deepEqual(after2.warehouse?.gear, [
+      { slot: "talisman", treasureId: "gear-huangquanfan" },
+      { slot: "talisman", treasureId: "gear-qingyunzhu" },
+    ]);
+    const profile2 = buildCombatProfile(discipleOf(after2, "d-1"));
+    assert.equal(profile2.firstStrike, baseProfile.firstStrike + 6);
+    assert.ok(after2.chronicle[0]?.text.includes("「御风环」"));
+    // 黄泉幡：防御 +50%（基础防御 floor 值 ×1.5 四舍五入；初始弟子无功法，base 即 floor 值）。
+    const { state: after3 } = wearGear(after2, "d-1", "talisman", "gear-huangquanfan");
+    const profile3 = buildCombatProfile(discipleOf(after3, "d-1"));
+    assert.equal(profile3.breakdown.gear.defensePct, 50);
+    assert.equal(profile3.defense, Math.round(baseProfile.defense * 1.5));
+    assert.ok(after3.chronicle[0]?.text.includes("防御 +50%"));
+    // 仓库无此法宝被拒；目录不存在的 id 同样被拒。
+    assert.throws(
+      () => wearGear(after3, "d-1", "talisman", "gear-hundunzhong"),
+      /gear_not_in_warehouse/,
+    );
+    assert.throws(() => wearGear(after3, "d-1", "talisman", "gear-none"), /gear_invalid/);
+  });
+
+  it("旧档法宝迁移：仓库/已穿戴档位数字 → 法宝 id、旧 gear 任务剥离槽档、幂等", () => {
     const state = newGame();
     state.warehouse = {
       gear: [
         { slot: "talisman", tier: 1 },
-        { slot: "talisman", tier: 2 },
-      ],
+        { slot: "talisman", tier: 4 },
+      ] as never,
       pills: [],
     };
-    const baseMagic = buildCombatProfile(discipleOf(state, "d-1")).magicPower;
-    const { state: after1 } = wearGear(state, "d-1", "talisman", 1);
-    assert.deepEqual(discipleOf(after1, "d-1").equippedGear, { talisman: 1 });
-    assert.deepEqual(after1.warehouse?.gear, [{ slot: "talisman", tier: 2 }]);
-    assert.equal(buildCombatProfile(discipleOf(after1, "d-1")).magicPower, baseMagic + 8);
-    // 替换：档 2 上身、档 1 回仓。
-    const { state: after2 } = wearGear(after1, "d-1", "talisman", 2);
-    assert.deepEqual(discipleOf(after2, "d-1").equippedGear, { talisman: 2 });
-    assert.deepEqual(after2.warehouse?.gear, [{ slot: "talisman", tier: 1 }]);
-    assert.equal(buildCombatProfile(discipleOf(after2, "d-1")).magicPower, baseMagic + 14);
-    // 仓库无此装备被拒。
-    assert.throws(() => wearGear(after2, "d-1", "talisman", 4), /gear_not_in_warehouse/);
+    discipleOf(state, "d-1").equippedGear = { talisman: 2 } as never;
+    if (state.rival) {
+      for (const disciple of state.rival.disciples) {
+        disciple.equippedGear = { talisman: 3 } as never;
+      }
+    }
+    state.jobs = {
+      pill: { workers: [], assignedOuter: 0, task: null },
+      gear: {
+        workers: [],
+        assignedOuter: 5,
+        task: { kind: "gear", slot: "talisman", tier: 3, accumulatedPoints: 40 } as never,
+      },
+    };
+    const migrated = migrateGameState(state);
+    // 仓库：档位 → 该档代表法宝（目录首位）。
+    assert.deepEqual(migrated.warehouse?.gear, [
+      { slot: "talisman", treasureId: "gear-qingyunzhu" },
+      { slot: "talisman", treasureId: "gear-hundunzhong" },
+    ]);
+    // 已穿戴：档 2 → 御风环。
+    const wearer = migrated.disciples.find((entry) => entry.id === "d-1");
+    assert.deepEqual(wearer?.equippedGear, { talisman: "gear-yufenghuan" });
+    // 对手名册：档 3 → 离火扇（品阶 3 目录首位）；法宝 id 均在目录内。
+    if (migrated.rival) {
+      for (const disciple of migrated.rival.disciples) {
+        assert.equal(disciple.equippedGear?.talisman, "gear-lihuoshan");
+      }
+    }
+    // 在炉法宝任务：槽档剥离、进度保留。
+    assert.deepEqual(migrated.jobs?.gear.task, { kind: "gear", accumulatedPoints: 40 });
+    // 幂等：迁移后再迁移不变。
+    assert.deepEqual(migrateGameState(migrated), migrated);
   });
 
-  it("资源长老：灵脉产出 +20% 月结生效（200 → 240）；长老不修炼", () => {
+  it("资源长老：供奉已删除暂无加成，任命仍生效；不历练（历练选将不选）但照常修炼", () => {
     let state = newGame();
     state = appointElder(state, "d-1", "resource").state;
     assert.equal(state.elders?.resource, "d-1");
     const { state: after } = settleMonthly(state);
-    // 产出 round(200×1.2) = 240，俸禄 30 → +210（危险-安全月历练无灵石入账）。
-    assert.equal(after.spiritStones, 2000 + 240 - 30);
-    // 长老不修炼：真元零增长。
-    assert.equal(discipleOf(after, "d-1").zhenyuan, 0);
+    // 供奉已删除（新局未分岗无挖矿收入）：仅 − 俸禄 30（危险-安全月历练无灵石入账）。
+    assert.equal(after.spiritStones, 2000 - 30);
+    // 不历练：历练选将的可出战名册不含占用者。
+    const readyIds = new Set(
+      combatReadyDisciples(after, after.currentTurn).map((entry) => entry.id),
+    );
+    assert.ok(!readyIds.has("d-1"));
+    assert.ok(readyIds.has("d-2"));
+    // 照常修炼：真元每月增长。
+    assert.ok(discipleOf(after, "d-1").zhenyuan > 0);
     assert.ok(discipleOf(after, "d-2").zhenyuan > 0);
   });
 
@@ -556,6 +655,66 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
     // 在岗丹师不可任长老。
     state = assignWorkshopJob(replaced.state, "pill", "d-3").state;
     assert.throws(() => appointElder(state, "d-3", "war"), /disciple_job_busy/);
+  });
+
+  it("灵矿长老：挖矿上缴按境界加成（每级 +10%，元婴前期 +100% 封顶）；任内照常修炼、不被历练选将、卸任即失效", () => {
+    // 加成曲线：练气前期 +10% … 元婴前期（10 级）+100%，越界钳顶。
+    assert.equal(mineElderBonusPct(1), 0.1);
+    assert.equal(mineElderBonusPct(7), 0.7);
+    assert.equal(mineElderBonusPct(10), 1);
+    assert.equal(mineElderBonusPct(99), 1);
+    assert.equal(mineElderBonusPct(0), 0);
+
+    // 月结对照：同 seed、只差挖矿配置与长老在任/境界（d-1 在任时不出战，历练选将不受影响）。
+    const setup = (realmLevel: number, appointed: boolean): GameState => {
+      let state = newGame("mine-elder-1");
+      state = assignOuterJobs(state, { mining: 10 }).state;
+      const elder = discipleOf(state, "d-1");
+      elder.realmLevel = realmLevel;
+      elder.realm = realmStageForLevel(realmLevel).realm;
+      return appointed ? appointElder(state, "d-1", "mine").state : state;
+    };
+    const noMining = settleMonthly(newGame("mine-elder-1"));
+    const goldenCore = settleMonthly(setup(7, true));
+    const nascentSoul = settleMonthly(setup(10, true));
+    // 挖矿收入 = 上缴 ×(1+加成)：金丹前期（7 级）+70% → 17 灵石；元婴前期（10 级）封顶 +100% → 20 灵石。
+    assert.equal(goldenCore.result.spiritStonesDelta - noMining.result.spiritStonesDelta, 17);
+    assert.equal(nascentSoul.result.spiritStonesDelta - noMining.result.spiritStonesDelta, 20);
+    // 任内不历练（历练选将不选）但照常修炼（金丹前期 7 级：月真元远未到 3 万突破阈值）。
+    const readyIds = new Set(
+      combatReadyDisciples(goldenCore.state, goldenCore.state.currentTurn).map((entry) => entry.id),
+    );
+    assert.ok(!readyIds.has("d-1"));
+    assert.ok(discipleOf(goldenCore.state, "d-1").zhenyuan > 0);
+    // 元婴前期（10 级）修行尽头：不再积累真元（TOP_REALM_LEVEL 守卫，与占岗无关）。
+    assert.equal(discipleOf(nascentSoul.state, "d-1").zhenyuan, 0);
+
+    // 卸任：elders.mine 清空、落纪事；再月结加成消失（与同境界无长老基线一致）。
+    const baseline = settleMonthly(setup(10, false));
+    const boosted = setup(10, true);
+    const removed = removeElder(boosted, "mine");
+    assert.equal(removed.state.elders?.mine, undefined);
+    assert.ok(removed.state.chronicle[0]?.text.includes("卸任灵矿长老"));
+    const settledRemoved = settleMonthly(removed.state);
+    assert.equal(settledRemoved.result.spiritStonesDelta, baseline.result.spiritStonesDelta);
+    // 无长老在任时卸任被拒。
+    assert.throws(() => removeElder(removed.state, "mine"), /elder_job_not_held/);
+  });
+
+  it("岗位/长老占用者不历练：会战名册同口径排除（自动选将取最强，构造占用者为全宗最强）", () => {
+    let state = createGame({ seed: "war-job-exclusion", sectName: "青云门", rivalName: "玄阴宗" });
+    // 任命 d-1 为长老并置为全宗最强：若名册排除失效，自动选将必先选 d-1。
+    state = appointElder(state, "d-1", "resource").state;
+    const holder = discipleOf(state, "d-1");
+    holder.realmLevel = 8;
+    holder.realm = realmStageForLevel(8).realm;
+    state = declareWar(state);
+    const { result } = settleMonthly(state);
+    assert.ok(result.war, "宣战次月应结算会战");
+    const fighters = result.war.pairOutcomes.map((entry) => entry.playerFighterId);
+    assert.ok(fighters.length > 0, "我方应有出战弟子");
+    // 唯一占用者 d-1（全宗最强）不入会战名册，其余 2 名无职弟子照常入选。
+    assert.deepEqual([...fighters].sort(), ["d-2", "d-3"]);
   });
 
   it("战备长老：全门突破率 +3 月结生效（边界 seed 扫描锁定）", () => {

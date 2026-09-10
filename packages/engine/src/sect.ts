@@ -10,7 +10,6 @@ export const SECT_RANK_RULES = {
 
 export type SectRank = keyof typeof SECT_RANK_RULES;
 
-export const OUTER_INCOME_PER_DISCIPLE = 2;
 export const INNER_SALARY_PER_DISCIPLE = 10;
 export const RECRUIT_COST = 300;
 export const RECRUIT_CANDIDATE_COUNT = 3;
@@ -19,7 +18,7 @@ export const INITIAL_MORALE = 70;
 export const INITIAL_PRESTIGE = 50;
 export const INITIAL_INNER_DISCIPLES = 3;
 // 外门弟子只是数字、不入个体名册：外门总数恒等于当前宗门等级的外门上限（1/2/3 级 = 100/300/500），
-// 开局即满员、升阶即扩容；在岗（丹房/器坊/挖矿/练气）之外的人数一律按供奉计。
+// 开局即满员、升阶即扩容；外门不产生供奉收入，产出只来自在岗分工（挖矿/丹房/器坊）。
 
 export type SectUpgradeRequirement = {
   cost: number;
@@ -29,11 +28,11 @@ export type SectUpgradeRequirement = {
   goldenCoreCount?: number;
 };
 
-// 升阶条件：1→2 任一弟子筑基 + 灵石 5,000；2→3 金丹弟子 ≥3 + 灵石 30,000。
+// 升阶条件：1→2 任一弟子筑基 + 灵石 5,000；2→3 金丹弟子 1 名 + 灵石 50,000。
 export const SECT_UPGRADE_REQUIREMENTS: Record<1, SectUpgradeRequirement> &
   Record<2, SectUpgradeRequirement> = {
   1: { cost: 5000, minRealmLevel: 4 },
-  2: { cost: 30000, goldenCoreCount: 3 },
+  2: { cost: 50000, goldenCoreCount: 1 },
 };
 
 export function sectLimitsFor(rank: GameState["sectRank"]): {

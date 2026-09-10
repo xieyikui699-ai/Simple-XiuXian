@@ -12,6 +12,7 @@ import { Button, Text, View } from "@tarojs/components";
 import { navigateTo, reLaunch, useDidShow } from "@tarojs/taro";
 import { useState } from "react";
 import { getGameStore, useGame } from "../../store/use-game";
+import { AdvanceBar } from "../../ui/advance-bar";
 import { formatZhenyuanRequirement, realmToneClass } from "../../ui/display";
 import { BackBar } from "../../ui/nav";
 import "./disciples.css";
@@ -49,14 +50,14 @@ export default function DisciplesPage() {
           navigateTo({ url: `/pages/disciple-detail/disciple-detail?id=${disciple.id}` })
         }
       >
-        <View className="disciple-name">{disciple.name}</View>
-        <View className="disciple-realm">
-          <Text className={realmToneClass(disciple.realmLevel)}>{stage.name}</Text>
-        </View>
-        <View className="disciple-zhenyuan">
+        <Text className="disciple-name">{disciple.name}</Text>
+        <Text className={`disciple-realm ${realmToneClass(disciple.realmLevel)}`}>
+          {stage.name}
+        </Text>
+        <Text className="disciple-zhenyuan">
           真元 {disciple.zhenyuan}/{formatZhenyuanRequirement(stage.requiredZhenyuan)} ·{" "}
           {disciple.age}/{disciple.maxLifespan} 岁
-        </View>
+        </Text>
       </View>
     );
   };
@@ -127,6 +128,7 @@ export default function DisciplesPage() {
           {inner.map(renderDisciple)}
         </View>
       </View>
+      <AdvanceBar />
     </View>
   );
 }

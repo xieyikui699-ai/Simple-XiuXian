@@ -2,13 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { generateDiscipleAttributes } from "./attributes.js";
 import {
-  FORGE_TIER_LIMIT_BY_RANK,
-  GEAR_CATALOG,
-  GEAR_CRAFT_POINTS,
   GEAR_SLOT_KEYS,
-  GEAR_TIERS,
-  type GearSlot,
-  type GearStats,
   type GearTier,
   MAX_SPELLS_PER_DISCIPLE,
   MAX_TECHNIQUES_PER_DISCIPLE,
@@ -18,15 +12,19 @@ import {
   SPELL_AFFINITY_PCT,
   type Spell,
   TECHNIQUES,
+  TREASURES,
   type Technique,
   canLearnSpell,
   canLearnTechnique,
   gearCombatInput,
-  getGear,
   getPillById,
   getSpellById,
   getTechniqueById,
+  getTreasureById,
+  representativeTreasureOfTier,
   spellAffinityMultiplier,
+  treasureEffectDescription,
+  treasuresOfTier,
   workshopCraftYieldPct,
 } from "./catalog.js";
 import { effectiveDeathAge, generateDiscipleMaxLifespan } from "./lifespan.js";
@@ -328,33 +326,94 @@ describe("法术目录（12 门主动战技）", () => {
   });
 });
 
-describe("装备系统（法宝 × 4 档固定数值）", () => {
-  it("全表数值逐字对齐设计表", () => {
-    const expected: Record<GearSlot, Record<GearTier, GearStats>> = {
-      talisman: {
-        1: { spellPowerFlat: 8 },
-        2: { spellPowerFlat: 14 },
-        3: { spellPowerFlat: 22 },
-        4: { spellPowerFlat: 32 },
-      },
-    };
-    assert.deepEqual(GEAR_CATALOG, expected);
+describe("装备系统（法宝目录 × 10，随机炼制/掉落）", () => {
+  it("目录 10 件：名称/品阶/效果逐字对齐设计表（品阶 1–4 各 3/3/2/2 件，效果两两不同）", () => {
+    assert.equal(TREASURES.length, 10);
+    assert.deepEqual(
+      TREASURES.map((treasure) => [treasure.name, treasure.tier, treasure.effect]),
+      [
+        ["青云珠", 1, { attributeFlat: { soulPower: 5 } }],
+        ["赤炎铃", 1, { attributeFlat: { strength: 5 } }],
+        ["玄水镜", 1, { attributeFlat: { physique: 5 } }],
+        ["御风环", 2, { attributeFlat: { agility: 6 } }],
+        ["紫雷梭", 2, { critFlat: 8 }],
+        ["黄泉幡", 2, { defensePct: 50 }],
+        ["离火扇", 3, { attackPct: 35 }],
+        ["山河鼎", 3, { maxHpFlat: 500 }],
+        ["混沌钟", 4, { spellPowerFlat: 32 }],
+        [
+          "太虚塔",
+          4,
+          {
+            attributeFlat: { strength: 3, soulPower: 3, agility: 3, physique: 3, comprehension: 3 },
+          },
+        ],
+      ],
+    );
+    // 效果描述：逐件锁定展示文案，且两两不重复。
+    const descriptions = TREASURES.map((treasure) => treasureEffectDescription(treasure));
+    assert.deepEqual(descriptions, [
+      "魂力 +5",
+      "力量 +5",
+      "体魄 +5",
+      "身法 +6",
+      "暴击率 +8%",
+      "防御 +50%",
+      "攻击 +35%",
+      "生命 +500",
+      "法威 +32",
+      "五维各 +3",
+    ]);
+    assert.equal(new Set(descriptions).size, descriptions.length);
     assert.deepEqual([...GEAR_SLOT_KEYS], ["talisman"]);
+    assert.deepEqual(
+      [1, 2, 3, 4].map((tier) => treasuresOfTier(tier as GearTier).length),
+      [3, 3, 2, 2],
+    );
   });
 
-  it("器坊点数 20/60/150/300（费用改按外门月耗逐月结算）", () => {
-    assert.deepEqual(GEAR_CRAFT_POINTS, { 1: 20, 2: 60, 3: 150, 4: 300 });
-    assert.deepEqual([...GEAR_TIERS], [1, 2, 3, 4]);
+  it("id 检索与品阶代表法宝（旧档迁移用）", () => {
+    assert.equal(getTreasureById("gear-qingyunzhu")?.name, "青云珠");
+    assert.equal(getTreasureById("gear-none"), undefined);
+    assert.equal(representativeTreasureOfTier(4).id, "gear-hundunzhong");
+    assert.deepEqual(representativeTreasureOfTier(1).effect.attributeFlat, { soulPower: 5 });
   });
 
-  it("宗门等级限档映射：1 级→档 2 / 2 级→档 3 / 3 级→档 4", () => {
-    assert.deepEqual(FORGE_TIER_LIMIT_BY_RANK, { 1: 2, 2: 3, 3: 4 });
-  });
-
-  it("装备战力输入接口：法宝法威平加", () => {
-    assert.deepEqual(getGear("talisman", 1), { spellPowerFlat: 8 });
-    assert.deepEqual(gearCombatInput(undefined), { spellPowerFlat: 0 });
-    assert.deepEqual(gearCombatInput({ talisman: 4 }), { spellPowerFlat: 32 });
+  it("装备战力输入接口：法宝各单项效果平加", () => {
+    const empty = {
+      spellPowerFlat: 0,
+      attackFlat: 0,
+      attackPct: 0,
+      defenseFlat: 0,
+      defensePct: 0,
+      maxHpFlat: 0,
+      critFlat: 0,
+      attributeFlat: {},
+    };
+    assert.deepEqual(gearCombatInput(undefined), empty);
+    assert.deepEqual(gearCombatInput({ talisman: "gear-none" }), empty);
+    assert.deepEqual(gearCombatInput({ talisman: "gear-qingyunzhu" }), {
+      ...empty,
+      attributeFlat: { soulPower: 5 },
+    });
+    assert.deepEqual(gearCombatInput({ talisman: "gear-zileisuo" }), { ...empty, critFlat: 8 });
+    assert.deepEqual(gearCombatInput({ talisman: "gear-huangquanfan" }), {
+      ...empty,
+      defensePct: 50,
+    });
+    assert.deepEqual(gearCombatInput({ talisman: "gear-lihuoshan" }), { ...empty, attackPct: 35 });
+    assert.deepEqual(gearCombatInput({ talisman: "gear-shanheding" }), {
+      ...empty,
+      maxHpFlat: 500,
+    });
+    assert.deepEqual(gearCombatInput({ talisman: "gear-hundunzhong" }), {
+      ...empty,
+      spellPowerFlat: 32,
+    });
+    assert.deepEqual(gearCombatInput({ talisman: "gear-taixuta" }), {
+      ...empty,
+      attributeFlat: { strength: 3, soulPower: 3, agility: 3, physique: 3, comprehension: 3 },
+    });
   });
 });
 
@@ -367,12 +426,12 @@ describe("丹药系统（2 种，丹房）", () => {
     );
   });
 
-  it("延寿丹：最大寿命 +10 年（炼制点数统一 30，与丹方无关）", () => {
+  it("延寿丹：最大寿命 +30 年（炼制点数统一 30，与丹方无关）", () => {
     const pill = pillByName("延寿丹");
-    assert.equal(pill.effect.lifespanFlat, 10);
+    assert.equal(pill.effect.lifespanFlat, 30);
   });
 
-  it("聚灵丹：12 月真元 ×1.5 不叠加刷新", () => {
+  it("聚灵丹：12 月真元 ×1.5（倍率不叠加、时长累加）", () => {
     const pill = pillByName("聚灵丹");
     assert.deepEqual(pill.effect.zhenyuanBuff, { multiplier: 1.5, months: 12, stacks: false });
   });
@@ -466,17 +525,17 @@ describe("升阶条件表回归（M1 既有 sectUpgradeFailureReason 不回归�
     );
   });
 
-  it("2→3：金丹及以上内门弟子 ≥3 + 灵石 30,000", () => {
-    const base = [
-      discipleFixture({ id: "d-1", realmLevel: 7 }),
-      discipleFixture({ id: "d-2", realmLevel: 7 }),
+  it("2→3：金丹及以上内门弟子 1 名 + 灵石 50,000", () => {
+    const noGoldenCore = [
+      discipleFixture({ id: "d-1", realmLevel: 4 }),
+      discipleFixture({ id: "d-2", realmLevel: 5 }),
     ];
     assert.equal(
       sectUpgradeFailureReason(
         sectFixture({
           sectRank: 2,
-          spiritStones: 29000,
-          disciples: [...base, discipleFixture({ id: "d-3", realmLevel: 7 })],
+          spiritStones: 49000,
+          disciples: [...noGoldenCore, discipleFixture({ id: "d-3", realmLevel: 7 })],
         }),
       ),
       "insufficient_resource",
@@ -485,8 +544,8 @@ describe("升阶条件表回归（M1 既有 sectUpgradeFailureReason 不回归�
       sectUpgradeFailureReason(
         sectFixture({
           sectRank: 2,
-          spiritStones: 31000,
-          disciples: [...base, discipleFixture({ id: "d-3", realmLevel: 4 })],
+          spiritStones: 51000,
+          disciples: noGoldenCore,
         }),
       ),
       "sect_upgrade_golden_core_not_met",
@@ -495,8 +554,8 @@ describe("升阶条件表回归（M1 既有 sectUpgradeFailureReason 不回归�
       sectUpgradeFailureReason(
         sectFixture({
           sectRank: 2,
-          spiritStones: 31000,
-          disciples: [...base, discipleFixture({ id: "d-3", realmLevel: 7 })],
+          spiritStones: 51000,
+          disciples: [...noGoldenCore, discipleFixture({ id: "d-3", realmLevel: 7 })],
         }),
       ),
       undefined,

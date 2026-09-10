@@ -1,12 +1,17 @@
-// 内容目录：功法 8 门 / 法术 12 门 / 装备 4 槽×4 档 / 丹药 2 种。
+// 内容目录：功法 8 门 / 法术 12 门 / 法宝 10 件 / 丹药 2 种。
 // 数值唯一来源：docs/design/2026-09-06-小程序简化版设计.md §功法目录/§法术目录/§装备系统/§丹药系统。
 // 本模块只做目录数据与检索/校验辅助：不做生产推进（production.ts）、不做管理命令（engine.ts）。
-import type { DiscipleAttributes } from "./attributes.js";
+import {
+  ATTRIBUTE_DISPLAY_NAMES,
+  ATTRIBUTE_KEYS,
+  type AttributeKey,
+  type DiscipleAttributes,
+} from "./attributes.js";
 import type { RootElement } from "./roots.js";
 import { TALENTS } from "./talents.js";
 
 // ─── 功法目录（8 门，被动）───────────────────────────────────────────────
-// 每弟子限修 1 门；宗门藏经阁拥有即可研读习得，不耗书。
+// 每弟子限修 1 门；宗门藏经阁拥有即可研读习得，书册研读后消耗（一书仅一人可研，历练奇遇可再得）。
 
 export type TechniqueEffect = {
   /** 月度真元增幅率（加法并入总增幅池，与天赋同口径）。 */
@@ -237,9 +242,10 @@ export function canLearnSpell(
   return librarySpellIds.includes(spellId) && learnedCount < MAX_SPELLS_PER_DISCIPLE;
 }
 
-// ─── 装备系统（法宝 × 4 档固定数值）─────────────────────────────────────
-// 无随机、无词缀；弟子至多 1 件法宝；来源：器坊炼制 + 历练掉落。
-// 只有法宝一件装备（功法/法术之外唯一物件），无武器护甲饰品。
+// ─── 装备系统（法宝目录 × 10，随机炼制/掉落）───────────────────────────
+// 法宝是唯一装备（功法/法术之外唯一物件），弟子至多 1 件；来源：器坊炼制 + 历练掉落。
+// 目录 10 件各有其名，效果各加各的单项战斗数值（五维/攻击/防御/生命/暴击/法威），
+// 品阶仅作掉落池与 NPC 配装的内部数值带，不在 UI 展示（UI 显示法宝名 + 效果描述）。
 
 export const GEAR_SLOT_KEYS = ["talisman"] as const;
 export type GearSlot = (typeof GEAR_SLOT_KEYS)[number];
@@ -248,53 +254,153 @@ export const GEAR_SLOT_DISPLAY_NAMES: Record<GearSlot, string> = {
   talisman: "法宝",
 };
 
+/** 内部品阶数值带（1–4）：只用于历练掉落池与 NPC 按宗门等级配装，不入 UI。 */
 export type GearTier = 1 | 2 | 3 | 4;
 export const GEAR_TIERS: readonly GearTier[] = [1, 2, 3, 4];
 
-export type GearStats = {
-  /** 法术威力平加（法宝）。 */
-  spellPowerFlat: number;
+export type TreasureEffect = {
+  /** 法术威力（法威）平加。 */
+  spellPowerFlat?: number;
+  /** 物理攻击平加。 */
+  attackFlat?: number;
+  /** 物理攻击百分比加成（百分点，乘等级乘区基础派生值后四舍五入，如离火扇 +35%）。 */
+  attackPct?: number;
+  /** 防御平加（派生取整之外直接加值，与功法防御同口径）。 */
+  defenseFlat?: number;
+  /** 防御百分比加成（百分点，乘等级乘区基础派生值后四舍五入，如黄泉幡 +50%）。 */
+  defensePct?: number;
+  /** 最大生命平加。 */
+  maxHpFlat?: number;
+  /** 暴击率平加（百分点）。 */
+  critFlat?: number;
+  /** 五维平加（与天赋/功法同并入有效五维，参与 clamp(1,100)）。 */
+  attributeFlat?: Partial<DiscipleAttributes>;
 };
 
-/** 法宝 4 档固定数值表。 */
-export const GEAR_CATALOG: Record<GearSlot, Record<GearTier, GearStats>> = {
-  talisman: {
-    1: { spellPowerFlat: 8 },
-    2: { spellPowerFlat: 14 },
-    3: { spellPowerFlat: 22 },
-    4: { spellPowerFlat: 32 },
+export type Treasure = {
+  id: string;
+  name: string;
+  /** 内部品阶（1–4，不入 UI 展示）。 */
+  tier: GearTier;
+  /** 单项效果：十件各加各的（五维/攻击/防御/生命/暴击/法威）。 */
+  effect: TreasureEffect;
+};
+
+/**
+ * 法宝目录 10 件：品阶 1–4 各 3/3/2/2 件，效果两两不同；
+ * 器坊炼制十选一随机出炉，历练掉落其中品阶 1–2 六种。
+ */
+export const TREASURES: readonly Treasure[] = [
+  { id: "gear-qingyunzhu", name: "青云珠", tier: 1, effect: { attributeFlat: { soulPower: 5 } } },
+  { id: "gear-chiyanling", name: "赤炎铃", tier: 1, effect: { attributeFlat: { strength: 5 } } },
+  { id: "gear-xuanshuijing", name: "玄水镜", tier: 1, effect: { attributeFlat: { physique: 5 } } },
+  { id: "gear-yufenghuan", name: "御风环", tier: 2, effect: { attributeFlat: { agility: 6 } } },
+  { id: "gear-zileisuo", name: "紫雷梭", tier: 2, effect: { critFlat: 8 } },
+  { id: "gear-huangquanfan", name: "黄泉幡", tier: 2, effect: { defensePct: 50 } },
+  { id: "gear-lihuoshan", name: "离火扇", tier: 3, effect: { attackPct: 35 } },
+  { id: "gear-shanheding", name: "山河鼎", tier: 3, effect: { maxHpFlat: 500 } },
+  { id: "gear-hundunzhong", name: "混沌钟", tier: 4, effect: { spellPowerFlat: 32 } },
+  {
+    id: "gear-taixuta",
+    name: "太虚塔",
+    tier: 4,
+    effect: {
+      attributeFlat: { strength: 3, soulPower: 3, agility: 3, physique: 3, comprehension: 3 },
+    },
   },
-};
+] as const;
 
-export function getGear(slot: GearSlot, tier: GearTier): GearStats | undefined {
-  return GEAR_CATALOG[slot]?.[tier];
+const TREASURE_BY_ID = new Map(TREASURES.map((treasure) => [treasure.id, treasure]));
+
+export function getTreasureById(id: string): Treasure | undefined {
+  return TREASURE_BY_ID.get(id);
 }
 
-/** 器坊炼制总点数（月结按投入外门人数推进）：档 1=20 / 档 2=60 / 档 3=150 / 档 4=300。 */
-export const GEAR_CRAFT_POINTS: Record<GearTier, number> = { 1: 20, 2: 60, 3: 150, 4: 300 };
+/** 指定品阶的法宝列表（历练掉落池 / NPC 按宗门等级配装用）。 */
+export function treasuresOfTier(tier: GearTier): Treasure[] {
+  return TREASURES.filter((treasure) => treasure.tier === tier);
+}
 
-/** 宗门等级限档：1 级→档 1–2 / 2 级→档 1–3 / 3 级→档 1–4。 */
-export const FORGE_TIER_LIMIT_BY_RANK: Record<1 | 2 | 3, GearTier> = { 1: 2, 2: 3, 3: 4 };
+/** 品阶代表法宝（该阶目录首位）：仅旧档档位迁移用。 */
+export function representativeTreasureOfTier(tier: GearTier): Treasure {
+  const found = treasuresOfTier(tier)[0];
+  if (!found) throw new Error("treasure_tier_empty");
+  return found;
+}
 
-/** 弟子已穿戴装备：槽位 → 档位（每槽至多 1 件；固定数值无实例差异）。 */
-export type EquippedGear = { [slot in GearSlot]?: GearTier };
+/**
+ * 法宝效果描述（UI/纪事文案用）：「魂力 +5」/「暴击率 +8%」/「五维各 +3」等。
+ * 五维项：单一维度显示维度名，五维等值显示「五维各 +N」。
+ */
+export function treasureEffectDescription(treasure: Treasure): string {
+  const effect = treasure.effect;
+  const parts: string[] = [];
+  if (effect.attributeFlat) {
+    const entries = Object.entries(effect.attributeFlat) as [AttributeKey, number][];
+    const first = entries[0]?.[1];
+    const sameValue = first !== undefined && entries.every(([, value]) => value === first);
+    if (entries.length === ATTRIBUTE_KEYS.length && sameValue) {
+      parts.push(`五维各 +${first}`);
+    } else {
+      parts.push(...entries.map(([key, value]) => `${ATTRIBUTE_DISPLAY_NAMES[key]} +${value}`));
+    }
+  }
+  if (effect.attackFlat !== undefined) parts.push(`攻击 +${effect.attackFlat}`);
+  if (effect.attackPct !== undefined) parts.push(`攻击 +${effect.attackPct}%`);
+  if (effect.defenseFlat !== undefined) parts.push(`防御 +${effect.defenseFlat}`);
+  if (effect.defensePct !== undefined) parts.push(`防御 +${effect.defensePct}%`);
+  if (effect.maxHpFlat !== undefined) parts.push(`生命 +${effect.maxHpFlat}`);
+  if (effect.critFlat !== undefined) parts.push(`暴击率 +${effect.critFlat}%`);
+  if (effect.spellPowerFlat !== undefined) parts.push(`法威 +${effect.spellPowerFlat}`);
+  return parts.length > 0 ? parts.join("·") : "无效果";
+}
 
-/** 装备战力输入接口（供 combat-profile 读取）：法宝法威平加。 */
+/** 弟子已穿戴装备：槽位 → 法宝 id（每槽至多 1 件）。 */
+export type EquippedGear = { [slot in GearSlot]?: string };
+
+/** 装备战力输入接口（供 combat-profile 读取）：法宝各单项效果（平加/百分比）聚合。 */
 export type GearCombatInput = {
   spellPowerFlat: number;
+  attackFlat: number;
+  attackPct: number;
+  defenseFlat: number;
+  defensePct: number;
+  maxHpFlat: number;
+  critFlat: number;
+  attributeFlat: Partial<DiscipleAttributes>;
 };
 
 export function gearCombatInput(equipped: EquippedGear | undefined): GearCombatInput {
   const result: GearCombatInput = {
     spellPowerFlat: 0,
+    attackFlat: 0,
+    attackPct: 0,
+    defenseFlat: 0,
+    defensePct: 0,
+    maxHpFlat: 0,
+    critFlat: 0,
+    attributeFlat: {},
   };
   if (!equipped) return result;
   for (const slot of GEAR_SLOT_KEYS) {
-    const tier = equipped[slot];
-    if (tier === undefined) continue;
-    const stats = getGear(slot, tier);
-    if (!stats) continue;
-    result.spellPowerFlat += stats.spellPowerFlat;
+    const treasureId = equipped[slot];
+    if (treasureId === undefined) continue;
+    const treasure = getTreasureById(treasureId);
+    if (!treasure) continue;
+    const effect = treasure.effect;
+    result.spellPowerFlat += effect.spellPowerFlat ?? 0;
+    result.attackFlat += effect.attackFlat ?? 0;
+    result.attackPct += effect.attackPct ?? 0;
+    result.defenseFlat += effect.defenseFlat ?? 0;
+    result.defensePct += effect.defensePct ?? 0;
+    result.maxHpFlat += effect.maxHpFlat ?? 0;
+    result.critFlat += effect.critFlat ?? 0;
+    for (const [key, value] of Object.entries(effect.attributeFlat ?? {}) as [
+      AttributeKey,
+      number,
+    ][]) {
+      result.attributeFlat[key] = (result.attributeFlat[key] ?? 0) + value;
+    }
   }
   return result;
 }
@@ -304,7 +410,7 @@ export function gearCombatInput(equipped: EquippedGear | undefined): GearCombatI
 export type PillEffect = {
   /** 服用后有效最大寿命 +N 年。 */
   lifespanFlat?: number;
-  /** 服用者真元增益：×multiplier 持续 months 月；stacks=false 时重复服用不叠加、刷新剩余月数。 */
+  /** 服用者真元增益：×multiplier 持续 months 月；stacks=false 时重复服用倍率不叠加、时长在剩余月数上累加。 */
   zhenyuanBuff?: { multiplier: number; months: number; stacks: false };
 };
 
@@ -318,7 +424,7 @@ export const PILLS: readonly Pill[] = [
   {
     id: "pill-yanshou",
     name: "延寿丹",
-    effect: { lifespanFlat: 10 },
+    effect: { lifespanFlat: 30 },
   },
   {
     id: "pill-juling",

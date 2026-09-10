@@ -1,12 +1,14 @@
 // 丹房/器坊生产切片测试：主持任命 → 外门投入（滑杆）→ 挂任务 → 月结推进（月耗/加速/封顶）
-// → 出炉连炉（丹方随机各半）→ 超编裁剪 → 旧档兼容（旧点数池/旧 pill 任务迁移）→ 确定性。
+// → 出炉连炉（丹方随机各半、法宝十选一随机）→ 超编裁剪 → 旧档兼容（旧点数池/旧 pill/gear 任务迁移）→ 确定性。
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { TREASURES } from "./catalog.js";
 import { createGame } from "./engine.js";
 import { deterministicRoll } from "./hash.js";
 import {
   ADULT_AGE,
   GEAR_MONTHLY_PROGRESS_CAP_RATIO,
+  GEAR_TASK_POINTS,
   PILL_COST_PER_OUTER_MONTH,
   PILL_TASK_POINTS,
   WORKSHOP_MASTER_LIMIT,
@@ -14,8 +16,8 @@ import {
   assignWorkshopJob,
   estimateCraftMonths,
   jobsOf,
-  maxForgeTierForRank,
   removeWorkshopJob,
+  rollCraftTreasure,
   setWorkshopStaff,
   startWorkshopTask,
   warehouseOf,
@@ -26,6 +28,11 @@ import {
 } from "./production.js";
 import { settleMonthly } from "./settlement.js";
 import type { GameState } from "./state.js";
+
+/** 出炉法宝掷骰对拍：引擎导出的 rollCraftTreasure（`${seed}:gear-craft:${turn}` 十等分取目录）。 */
+function expectedTreasureId(seed: string, turn: number): string {
+  return rollCraftTreasure(seed, turn).id;
+}
 
 function newGame(seed = "prod-seed-1"): GameState {
   return createGame({ seed, sectName: "青云门" });
@@ -59,10 +66,13 @@ function productionScenario(seed: string): GameState {
   let state = newGame(seed);
   state = assignWorkshopJob(state, "pill", "d-1").state;
   state = assignWorkshopJob(state, "gear", "d-2").state;
-  state = setWorkshopStaff(state, "pill", 70).state;
-  state = setWorkshopStaff(state, "gear", 30).state;
+  // 3 级宗门外门 500：器坊 420（×1.2 触 60% 封顶 300 点/月）第 2/4 月各出炉一炉；
+  // 丹房 80（96 点/月）第 4 月出炉。
+  state = { ...state, sectRank: 3 };
+  state = setWorkshopStaff(state, "pill", 80).state;
+  state = setWorkshopStaff(state, "gear", 420).state;
   state = startWorkshopTask(state, "pill", { kind: "pill" }).state;
-  state = startWorkshopTask(state, "gear", { kind: "gear", slot: "talisman", tier: 1 }).state;
+  state = startWorkshopTask(state, "gear", { kind: "gear" }).state;
   for (let i = 0; i < 4; i++) {
     state = advanceWorkshops(state).state;
   }
@@ -147,33 +157,23 @@ describe("外门投入（滑杆）", () => {
 });
 
 describe("在炉任务（挂任务免费，换任务进度作废）", () => {
-  it("挂炼丹任务不选丹方、不扣灵石（统一点数）；非法槽档 / 越档 / 房间不匹配拒绝", () => {
+  it("挂炼丹任务不选丹方、不扣灵石（统一点数）；器坊挂法宝任务同样免费；房间不匹配拒绝", () => {
     const state = { ...newGame(), spiritStones: 2000 };
     const { state: after } = startWorkshopTask(state, "pill", { kind: "pill" });
     assert.equal(after.spiritStones, 2000);
     assert.deepEqual(jobsOf(after).pill.task, { kind: "pill", accumulatedPoints: 0 });
     assert.equal(after.chronicle[0]?.text.includes("出炉随机"), true);
     assert.throws(
-      () => startWorkshopTask(state, "gear", { kind: "gear", slot: "talisman", tier: 5 as 4 }),
-      /gear_invalid/,
-    );
-    assert.throws(
-      () => startWorkshopTask(state, "gear", { kind: "gear", slot: "talisman", tier: 3 }),
-      /gear_tier_locked/,
-    );
-    assert.throws(
-      () => startWorkshopTask(state, "pill", { kind: "gear", slot: "talisman", tier: 1 }),
+      () => startWorkshopTask(state, "pill", { kind: "gear" }),
       /workshop_task_mismatch/,
     );
+    // 器坊：无图纸点选，挂任务即炼法宝（出炉随机目录十件其一）。
+    const { state: gearState } = startWorkshopTask(state, "gear", { kind: "gear" });
+    assert.deepEqual(jobsOf(gearState).gear.task, { kind: "gear", accumulatedPoints: 0 });
+    assert.ok(gearState.chronicle[0]?.text.includes("10 种法宝其一"));
   });
 
-  it("宗门等级限档：1 级档 1–2 / 2 级档 1–3 / 3 级档 1–4", () => {
-    assert.equal(maxForgeTierForRank(1), 2);
-    assert.equal(maxForgeTierForRank(2), 3);
-    assert.equal(maxForgeTierForRank(3), 4);
-  });
-
-  it("同任务幂等（进度保留）；器坊换图纸进度作废并落纪事", () => {
+  it("同任务幂等（进度保留）：丹房/器坊重复挂任务均幂等", () => {
     let state = newGame();
     state = setWorkshopStaff(state, "pill", 10).state;
     state = startWorkshopTask(state, "pill", { kind: "pill" }).state;
@@ -183,27 +183,14 @@ describe("在炉任务（挂任务免费，换任务进度作废）", () => {
     // 丹房重复挂任务：恒为同任务，幂等，进度保留。
     const { state: same } = startWorkshopTask(state, "pill", { kind: "pill" });
     closeTo(taskProgress(same, "pill"), progress);
-    // 器坊换图纸：进度归零 + 纪事注明作废。
+    // 器坊同理：法宝任务无目标可选，重复挂任务幂等。
     state = setWorkshopStaff(state, "gear", 5).state;
-    state = startWorkshopTask(state, "gear", { kind: "gear", slot: "talisman", tier: 1 }).state;
+    state = startWorkshopTask(state, "gear", { kind: "gear" }).state;
     state = advanceWorkshops(state).state;
     const gearProgress = taskProgress(state, "gear");
     assert.ok(gearProgress > 0);
-    const { state: switched } = startWorkshopTask(state, "gear", {
-      kind: "gear",
-      slot: "talisman",
-      tier: 2,
-    });
-    assert.deepEqual(jobsOf(switched).gear.task, {
-      kind: "gear",
-      slot: "talisman",
-      tier: 2,
-      accumulatedPoints: 0,
-    });
-    const entry = switched.chronicle[0];
-    assert.ok(entry);
-    assert.ok(entry.text.includes("档2"));
-    assert.ok(entry.text.includes("进度作废"));
+    const { state: sameGear } = startWorkshopTask(state, "gear", { kind: "gear" });
+    closeTo(taskProgress(sameGear, "gear"), gearProgress);
   });
 });
 
@@ -265,24 +252,25 @@ describe("月结推进（月耗 / 加速 / 封顶 / 出炉连炉）", () => {
     assert.deepEqual(jobsOf(masterGone).pill.workers, [], "离册主持自动离岗");
   });
 
-  it("器坊月推进封顶 60%：100 人炼档 2（60 点）单月至多 36 点，2 月出炉", () => {
+  it(`器坊月推进封顶 60%：500 人炼法宝（${GEAR_TASK_POINTS} 点）单月至多 300 点，2 月出炉`, () => {
     let state = newGame();
-    state = setWorkshopStaff(state, "gear", 100).state;
-    state = startWorkshopTask(state, "gear", { kind: "gear", slot: "talisman", tier: 2 }).state;
+    state = { ...state, sectRank: 3 };
+    state = setWorkshopStaff(state, "gear", 500).state;
+    state = startWorkshopTask(state, "gear", { kind: "gear" }).state;
     assert.equal(GEAR_MONTHLY_PROGRESS_CAP_RATIO, 0.6);
     let result = advanceWorkshops(state);
-    closeTo(taskProgress(result.state, "gear"), 36);
+    closeTo(taskProgress(result.state, "gear"), 300);
     assert.deepEqual(result.completedGear, []);
     result = advanceWorkshops(result.state);
-    assert.deepEqual(result.completedGear, [{ slot: "talisman", tier: 2 }]);
-    assert.deepEqual(warehouseOf(result.state).gear, [{ slot: "talisman", tier: 2 }]);
+    // 出炉法宝由确定性掷骰 `${seed}:gear-craft:${turn}` 十选一（直推未月结，turn 恒 1）。
+    const expectedGear = {
+      slot: "talisman" as const,
+      treasureId: expectedTreasureId("prod-seed-1", 1),
+    };
+    assert.deepEqual(result.completedGear, [expectedGear]);
+    assert.deepEqual(warehouseOf(result.state).gear, [expectedGear]);
     assert.ok(result.state.chronicle.some((entry) => entry.text.includes("器坊出炉")));
-    assert.deepEqual(jobsOf(result.state).gear.task, {
-      kind: "gear",
-      slot: "talisman",
-      tier: 2,
-      accumulatedPoints: 0,
-    });
+    assert.deepEqual(jobsOf(result.state).gear.task, { kind: "gear", accumulatedPoints: 0 });
   });
 
   it("灵石不敷月耗：当月停摆（no_funds），不推进不扣费；回血后恢复", () => {
@@ -306,11 +294,9 @@ describe("月结推进（月耗 / 加速 / 封顶 / 出炉连炉）", () => {
     assert.equal(estimateCraftMonths(state, "pill"), undefined);
     assert.equal(workshopPauseReason(state, "pill"), "no_staff");
     assert.equal(PILL_TASK_POINTS, 300);
+    assert.equal(GEAR_TASK_POINTS, 500);
     assert.equal(workshopTaskTotalPoints({ kind: "pill", accumulatedPoints: 0 }), PILL_TASK_POINTS);
-    assert.equal(
-      workshopTaskTotalPoints({ kind: "gear", slot: "talisman", tier: 1, accumulatedPoints: 0 }),
-      20,
-    );
+    assert.equal(workshopTaskTotalPoints({ kind: "gear", accumulatedPoints: 0 }), GEAR_TASK_POINTS);
   });
 });
 
@@ -327,7 +313,7 @@ describe("月结接线与旧档兼容", () => {
     const expectedPillId =
       deterministicRoll("prod-seed-1:pill-craft:2") < 50 ? "pill-yanshou" : "pill-juling";
     assert.deepEqual(warehouseOf(after).pills, [{ pillId: expectedPillId, count: 1 }]);
-    // 经济：月结 delta（供奉 − 俸禄 ± 历练）之外，生产月耗 100 灵石直接结算。
+    // 经济：月结 delta（挖矿 − 俸禄 ± 历练）之外，生产月耗 100 灵石直接结算。
     assert.equal(
       after.spiritStones,
       state.spiritStones + result.spiritStonesDelta - 100 * PILL_COST_PER_OUTER_MONTH,
@@ -398,6 +384,23 @@ describe("月结接线与旧档兼容", () => {
     });
   });
 
+  it("旧档 gear 任务带 slot/tier：读时剥离，进度保留（出炉改十件随机其一）", () => {
+    const legacy = newGame();
+    legacy.jobs = {
+      pill: { workers: [], assignedOuter: 0, task: null },
+      gear: {
+        workers: [],
+        assignedOuter: 10,
+        task: { kind: "gear", slot: "talisman", tier: 2, accumulatedPoints: 120 },
+      } as never,
+    };
+    assert.deepEqual(jobsOf(legacy).gear, {
+      workers: [],
+      assignedOuter: 10,
+      task: { kind: "gear", accumulatedPoints: 120 },
+    });
+  });
+
   it("旧档岗位点数池结构（points/tasks）读时归零迁移：主持保首位、其余丢弃", () => {
     const legacy = newGame();
     legacy.jobs = {
@@ -441,14 +444,16 @@ describe("生产确定性", () => {
     assert.notDeepEqual(a, c);
   });
 
-  it("生产全链路终态：丹药与装备入仓库、纪事齐备、连炉归零", () => {
+  it("生产全链路终态：丹药与法宝入仓库、纪事齐备、连炉归零", () => {
     const state = productionScenario("prod-scenario-check");
-    // 器坊档 1 月推进封顶 12 点：第 2/4 月各出炉一炉（连炉两轮）。
-    assert.deepEqual(warehouseOf(state).gear, [
-      { slot: "talisman", tier: 1 },
-      { slot: "talisman", tier: 1 },
-    ]);
-    // 丹房第 4 月出炉（主持练气前期 ×1.2：84/月 → 336 ≥ 300）：丹方由确定性掷骰决定（直推未月结，turn 恒 1）。
+    // 器坊法宝 500 点、月推进封顶 300 点（420 人 ×1.2 触顶）：第 2/4 月各出炉一炉（连炉两轮）。
+    // 直推未月结 turn 恒 1，两炉掷骰同命名空间 → 同一法宝出炉两次。
+    const expectedGear = {
+      slot: "talisman" as const,
+      treasureId: expectedTreasureId("prod-scenario-check", 1),
+    };
+    assert.deepEqual(warehouseOf(state).gear, [expectedGear, expectedGear]);
+    // 丹房第 4 月出炉（主持练气前期 ×1.2：96/月 → 384 ≥ 300）：丹方由确定性掷骰决定（直推未月结，turn 恒 1）。
     const expectedPillId =
       deterministicRoll("prod-scenario-check:pill-craft:1") < 50 ? "pill-yanshou" : "pill-juling";
     assert.deepEqual(warehouseOf(state).pills, [{ pillId: expectedPillId, count: 1 }]);
@@ -457,5 +462,42 @@ describe("生产确定性", () => {
     // 双双出炉归零、当月超出点数不结转。
     closeTo(taskProgress(state, "pill"), 0, 1e-9);
     closeTo(taskProgress(state, "gear"), 0, 1e-9);
+  });
+
+  it("出炉法宝十选一：同 seed 确定性、长跑十种全出现过且分布近似均匀", () => {
+    const runDistribution = (): Record<string, number> => {
+      let state: GameState = {
+        ...newGame("gear-dist"),
+        sectRank: 3,
+        spiritStones: 1_000_000,
+      };
+      state = setWorkshopStaff(state, "gear", 500).state;
+      state = startWorkshopTask(state, "gear", { kind: "gear" }).state;
+      const counts: Record<string, number> = {};
+      for (let turn = 2; turn <= 1002; turn++) {
+        // 直推月度生产并按月翻新掷骰游标（月结真实顺序：先 +1 再推进生产）。
+        const { state: after, completedGear } = advanceWorkshops({
+          ...state,
+          currentTurn: turn,
+        });
+        state = after;
+        for (const entry of completedGear) {
+          counts[entry.treasureId] = (counts[entry.treasureId] ?? 0) + 1;
+        }
+      }
+      return counts;
+    };
+    const counts = runDistribution();
+    assert.deepEqual(counts, runDistribution(), "同 seed 双跑分布完全一致");
+    const total = TREASURES.reduce((sum, treasure) => sum + (counts[treasure.id] ?? 0), 0);
+    // 500 人触 60% 封顶 300 点/月：约每 2 月出炉一炉，1001 月共约 500 炉。
+    assert.ok(total > 400, `出炉总数 ${total} 应在 400+`);
+    for (const treasure of TREASURES) {
+      const share = (counts[treasure.id] ?? 0) / total;
+      assert.ok(
+        (counts[treasure.id] ?? 0) > 0 && share > 0.02 && share < 0.2,
+        `${treasure.name} 占比 ${(share * 100).toFixed(1)}% 应接近 10%`,
+      );
+    }
   });
 });

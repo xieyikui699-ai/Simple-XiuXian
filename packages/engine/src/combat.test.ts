@@ -131,7 +131,7 @@ describe("属性派生唯一公式（combat-profile，玩家与 NPC 共用）", 
     );
   });
 
-  it("法术威力 = 30 + 等级×(魂力/4) + (等级−1)×10 + 法宝法威（档 1=+8 / 档 4=+32）", () => {
+  it("法术威力 = 30 + 等级×(魂力/4) + (等级−1)×10 + 法宝法威平加（如混沌钟 +32）", () => {
     assert.equal(
       deriveCombatProfile({ realmLevel: 1, attributes: BASE_ATTRIBUTES }).magicPower,
       43,
@@ -218,24 +218,54 @@ describe("属性派生唯一公式（combat-profile，玩家与 NPC 共用）", 
   it("弟子适配层：法宝/功法/天赋聚合成有效五维后进入公式，并返回分来源明细", () => {
     const profile = buildCombatProfile(
       makeDisciple({
-        equippedGear: { talisman: 1 },
+        equippedGear: { talisman: "gear-qingyunzhu" },
         techniqueId: "tech-houtu",
         talentIds: ["t-thunder-momentum"],
       }),
     );
-    // 有效五维：五维 = 基础 50 + 厚土诀体魄 5 → 体魄 55，其余 50。
+    // 有效五维：基础 50 + 厚土诀体魄 5 → 体魄 55；青云珠魂力 +5 → 魂力 55，其余 50。
     assert.equal(profile.maxHp, 100 + 55);
     assert.equal(profile.defense, Math.floor(5 + (55 / 4) * 1) + 5);
     assert.equal(profile.physicalAttack, 43);
-    assert.equal(profile.magicPower, 43 + 8);
+    assert.equal(profile.magicPower, Math.round(30 + (55 / 4) * 1));
     assert.equal(profile.firstStrike, 50 + 3);
     assert.equal(profile.breakdown.attributes.effective.physique, 55);
+    assert.equal(profile.breakdown.attributes.effective.soulPower, 55);
     assert.equal(profile.breakdown.attributes.artFlat.physique, 5);
+    assert.equal(profile.breakdown.attributes.gearFlat.soulPower, 5);
     assert.equal(profile.breakdown.artDefenseFlat, 5);
     assert.equal(profile.breakdown.talentFirstStrikeFlat, 3);
     // 减速修正经 speedModifier 进入先攻。
     const slowed = buildCombatProfile(makeDisciple(), { speedModifier: -5 });
     assert.equal(slowed.firstStrike, 45);
+  });
+
+  it("法宝单项效果：攻击/生命/暴击/防御/五维各自进入派生（离火扇/山河鼎/紫雷梭/黄泉幡/太虚塔）", () => {
+    const none = buildCombatProfile(makeDisciple());
+    // 离火扇：物理攻击 +35%（等级 1 力量 50：基础 42.5 → round(42.5×1.35)=57）。
+    const fan = buildCombatProfile(makeDisciple({ equippedGear: { talisman: "gear-lihuoshan" } }));
+    assert.equal(fan.physicalAttack, Math.round(42.5 * 1.35));
+    // 山河鼎：最大生命平加（150 → 650）。
+    const cauldron = buildCombatProfile(
+      makeDisciple({ equippedGear: { talisman: "gear-shanheding" } }),
+    );
+    assert.equal(cauldron.maxHp, none.maxHp + 500);
+    // 紫雷梭：暴击率百分点平加（悟性 50 → 23 → 31）。
+    const shuttle = buildCombatProfile(
+      makeDisciple({ equippedGear: { talisman: "gear-zileisuo" } }),
+    );
+    assert.equal(shuttle.critRate, none.critRate + 8);
+    // 黄泉幡：防御 +50%（⌊5+12.5⌋=17 → round(17×1.5)=26）。
+    const banner = buildCombatProfile(
+      makeDisciple({ equippedGear: { talisman: "gear-huangquanfan" } }),
+    );
+    assert.equal(banner.defense, Math.round(17 * 1.5));
+    // 太虚塔：五维各 +3 → 有效五维 53，攻击/法威按 53 重算（round(30+13.25)=43 → 44）。
+    const pagoda = buildCombatProfile(makeDisciple({ equippedGear: { talisman: "gear-taixuta" } }));
+    assert.equal(pagoda.breakdown.attributes.effective.strength, 53);
+    assert.equal(pagoda.breakdown.attributes.effective.comprehension, 53);
+    assert.equal(pagoda.physicalAttack, Math.round(30 + (53 / 4) * 1));
+    assert.equal(pagoda.magicPower, Math.round(30 + (53 / 4) * 1));
   });
 });
 
@@ -310,7 +340,7 @@ describe("回合规则（battle）", () => {
   });
 
   it("法术冷却：CD 内自动回落普通攻伐（金锋斩 CD 3 → 法/普/普/法）", () => {
-    // 施法者：魂力 90 + 法宝档 4（+32）→ 法威 30+225+90+32=377；等级 10 体魄 90 → 生命 1450、防御 266。
+    // 施法者：魂力 90 + 法宝混沌钟（法威 +32）→ 法威 30+225+90+32=377；等级 10 体魄 90 → 生命 1450、防御 266。
     // 金锋斩 2.2× 且与金灵根同系 ×1.15 → 对防 266 目标单发 round(377×2.53−212.8)=741；普攻 32。
     const spell = {
       id: "s-jinfeng",

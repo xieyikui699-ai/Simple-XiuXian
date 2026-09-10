@@ -5,7 +5,6 @@ import {
   type ElderKind,
   type GameState,
   type GearSlot,
-  type GearTier,
   type OuterJobsInput,
   type SettlementResult,
   appointElder,
@@ -15,7 +14,9 @@ import {
   createGame,
   declareWar,
   learnArt,
+  migrateGameState,
   recruitDisciple,
+  removeElder,
   removeWorkshopJob,
   setWorkshopStaff,
   settleMonthly,
@@ -66,9 +67,12 @@ const ERROR_MESSAGES: Record<string, string> = {
   disciple_not_found: "弟子不存在",
   inner_limit_reached: "内门席位已满",
   sect_rank_maxed: "宗门已是最高等级",
+  sect_upgrade_realm_not_met: "升阶条件未满足：需至少 1 名筑基及以上弟子",
+  sect_upgrade_golden_core_not_met: "升阶条件未满足：需至少 1 名金丹及以上弟子",
   disciple_not_inner: "仅内门弟子可执行此操作",
   disciple_not_adult: "弟子尚未成年",
   disciple_job_busy: "该弟子已有在身职务",
+  elder_job_not_held: "该职暂无长老在任",
   workshop_job_full: "该车间主持已满",
   workshop_job_not_held: "该弟子未任此岗",
   workshop_staff_invalid: "投入人数不合法",
@@ -77,8 +81,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   outer_jobs_invalid: "分工人数不合法",
   outer_jobs_over_capacity: "人手不足：各岗投入合计不能超过人手总数",
   workshop_task_mismatch: "任务与车间不匹配",
-  gear_invalid: "装备档位不存在",
-  gear_tier_locked: "宗门等级限制可炼档位",
+  gear_invalid: "法宝不存在",
+  gear_not_in_warehouse: "仓库中没有此法宝",
   pill_not_found: "丹药不存在",
   pill_not_in_warehouse: "仓库中没有此丹药",
   art_not_found: "不存在此功法或法术",
@@ -109,7 +113,7 @@ export type GameStore = {
   autoTick(): void;
   recruit(candidateId: string): void;
   upgrade(): void;
-  /** 丹房/器坊主持任命（无职成年内门，每房至多 1 名；不战斗不修炼）。 */
+  /** 丹房/器坊主持任命（无职成年内门，每房至多 1 名；不历练，修炼照常）。 */
   assignJob(kind: CraftJobKind, discipleId: string): void;
   removeJob(kind: CraftJobKind, discipleId: string): void;
   /** 丹房/器坊投入外门弟子（滑杆人数；两房合计 ≤ 外门总数）。 */
@@ -118,15 +122,15 @@ export type GameStore = {
   assignOuterJobs(jobs: OuterJobsInput): void;
   /** 丹房挂炼制任务（不选丹方：统一 300 点，出炉随机两种丹各半；投入外门弟子亦会自动开炉）。 */
   setPillTask(): void;
-  /** 器坊挂图纸（按宗门等级限档；换任务进度作废；投入外门弟子无图纸时默认武器档 1）。 */
-  setGearTask(slot: GearSlot, tier: GearTier): void;
   /** 研读功法/法术（藏经阁拥有即可）。 */
   study(discipleId: string, artId: string): void;
-  /** 任命长老（资源/战备各至多 1 名；旧长老自动卸任）。 */
+  /** 任命长老（资源/战备/灵矿各至多 1 名；旧长老自动卸任）。 */
   appointElder(discipleId: string, kind: ElderKind): void;
-  /** 穿戴装备：仓库取同槽同档，原槽装备卸下回仓。 */
-  wear(discipleId: string, slot: GearSlot, tier: GearTier): void;
-  /** 服用丹药：延寿丹 +10 寿命；聚灵丹 12 月真元 ×1.5（刷新不叠加）。 */
+  /** 长老卸任。 */
+  removeElder(kind: ElderKind): void;
+  /** 穿戴法宝：仓库取同槽同件，原槽法宝卸下回仓。 */
+  wear(discipleId: string, slot: GearSlot, treasureId: string): void;
+  /** 服用丹药：延寿丹 +30 寿命；聚灵丹 12 月真元 ×1.5（时长累加、倍率不叠加）。 */
   takePill(discipleId: string, pillId: string): void;
   /** 玩家宣战：来月月结第 ⑦ 步触发会战。 */
   wageWar(): void;
@@ -185,7 +189,8 @@ export function createGameStore(): GameStore {
       }
     },
     loadGame(state, difficulty) {
-      commit({ state, difficulty, lastResult: null, errorMessage: null });
+      // 旧档先过引擎迁移（装备法宝化等），再入会话。
+      commit({ state: migrateGameState(state), difficulty, lastResult: null, errorMessage: null });
     },
     settleMonth() {
       runEngineCommand(() => {
@@ -247,13 +252,6 @@ export function createGameStore(): GameStore {
         commit({ state: outcome.state });
       });
     },
-    setGearTask(slot, tier) {
-      runEngineCommand(() => {
-        if (!snapshot.state) throw new Error("disciple_not_found");
-        const outcome = startWorkshopTask(snapshot.state, "gear", { kind: "gear", slot, tier });
-        commit({ state: outcome.state });
-      });
-    },
     study(discipleId, artId) {
       runEngineCommand(() => {
         if (!snapshot.state) throw new Error("disciple_not_found");
@@ -268,10 +266,17 @@ export function createGameStore(): GameStore {
         commit({ state: outcome.state });
       });
     },
-    wear(discipleId, slot, tier) {
+    removeElder(kind) {
       runEngineCommand(() => {
         if (!snapshot.state) throw new Error("disciple_not_found");
-        const outcome = wearGear(snapshot.state, discipleId, slot, tier);
+        const outcome = removeElder(snapshot.state, kind);
+        commit({ state: outcome.state });
+      });
+    },
+    wear(discipleId, slot, treasureId) {
+      runEngineCommand(() => {
+        if (!snapshot.state) throw new Error("disciple_not_found");
+        const outcome = wearGear(snapshot.state, discipleId, slot, treasureId);
         commit({ state: outcome.state });
       });
     },

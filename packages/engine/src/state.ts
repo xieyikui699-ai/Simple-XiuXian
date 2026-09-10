@@ -2,7 +2,15 @@
 // M2 扩展字段（library/jobs/warehouse、弟子功法法术装备）均为可选：旧档缺字段时按空值口径兼容。
 import type { DiscipleAttributes } from "./attributes.js";
 import type { BattleReport } from "./battle.js";
-import type { CraftJobKind, EquippedGear, GearSlot, GearTier } from "./catalog.js";
+import {
+  type CraftJobKind,
+  type EquippedGear,
+  GEAR_SLOT_KEYS,
+  GEAR_TIERS,
+  type GearSlot,
+  type GearTier,
+  representativeTreasureOfTier,
+} from "./catalog.js";
 import type { ExpeditionReport } from "./expedition.js";
 import type { RivalSect } from "./rival.js";
 import type { RootElement, RootType } from "./roots.js";
@@ -37,9 +45,9 @@ export type Disciple = {
   techniqueId?: string;
   /** 已修法术（限 2 门；旧档缺省 = 空）。 */
   spellIds?: string[];
-  /** 已穿戴装备（槽位 → 档位；旧档缺省 = 空）。 */
+  /** 已穿戴装备（槽位 → 法宝 id；旧档缺省 = 空）。 */
   equippedGear?: EquippedGear;
-  /** 聚灵丹增益：该回目（含）之前真元获取 ×1.5；重复服用只刷新时长不叠加。 */
+  /** 聚灵丹增益：该回目（含）之前真元获取 ×1.5；重复服用倍率不叠加、时长在剩余月数上累加。 */
   spiritFocusUntilTurn?: number;
   /** 未愈伤势；缺省 = 无伤（旧档兼容）。 */
   injury?: Injury;
@@ -80,13 +88,14 @@ export type SectLibrary = {
 };
 
 /**
- * 在炉任务（丹房 = 炼丹、器坊 = 装备槽档；挂任务免费，月结按投入人手推进点数并扣月耗）。
- * 丹房不选丹方：点数统一（PILL_TASK_POINTS），满点出炉时在两种丹药中随机（各 50%）。
+ * 在炉任务（丹房 = 炼丹、器坊 = 炼法宝；挂任务免费，月结按投入人手推进点数并扣月耗）。
+ * 丹房不选丹方、器坊不选图纸：点数各自统一（PILL_TASK_POINTS / GEAR_TASK_POINTS），
+ * 满点出炉时丹房在两种丹药中随机（各 50%）、器坊在法宝目录十件中随机其一。
  * accumulatedPoints 为浮点累积（主持加速为乘算小数），满 totalPoints 即出炉。
  */
 export type WorkshopTask =
   | { kind: "pill"; accumulatedPoints: number }
-  | { kind: "gear"; slot: GearSlot; tier: GearTier; accumulatedPoints: number };
+  | { kind: "gear"; accumulatedPoints: number };
 
 /**
  * 车间（丹房/器坊）状态：外门投入制（参考完整版 crafting-v2，简化掉多炉与成功率）。
@@ -96,7 +105,7 @@ export type WorkshopTask =
  * - task：在炉任务；满点自动出炉入仓库并连炉（进度清零续炼同任务，换任务即打断）。
  */
 export type WorkshopState = {
-  /** 主持弟子（丹师/工匠的 discipleId，至多 1 名；不战斗不修炼）。 */
+  /** 主持弟子（丹师/工匠的 discipleId，至多 1 名；不历练，修炼照常）。 */
   workers: string[];
   /** 投入的外门弟子人数（外门只是数字；0 = 停工）。 */
   assignedOuter: number;
@@ -112,7 +121,8 @@ export type SectJobs = {
 
 export type WarehouseGearItem = {
   slot: GearSlot;
-  tier: GearTier;
+  /** 法宝目录 id（TREASURES；旧档档位数字在 migrateGameState 迁移为该档代表法宝）。 */
+  treasureId: string;
 };
 
 export type WarehouseStock = {
@@ -123,13 +133,15 @@ export type WarehouseStock = {
 };
 
 /** 长老任命（各至多 1 名，从无职成年内门弟子任命，可替换、旧长老自动卸任）：
- * 资源长老外门供奉 +20%、战备长老全门突破率 +3；长老不战斗不修炼。 */
+ * 资源长老暂无加成（外门供奉已移除）、战备长老全门突破率 +3、灵矿长老挖矿上缴按境界加成（元婴前期封顶 +100%）；
+ * 长老不历练（不出战），修炼照常。 */
 export type SectElders = {
   resource?: string;
   war?: string;
+  mine?: string;
 };
 
-/** 外门分工：挖矿/练气各岗在编人数（丹房/器坊投入记在车间 assignedOuter；旧档缺省 = 全员供奉）。 */
+/** 外门分工：挖矿/练气各岗在编人数（丹房/器坊投入记在车间 assignedOuter；旧档缺省 = 未分岗）。 */
 export type OuterJobsState = {
   mining: number;
   qi: number;
@@ -152,7 +164,7 @@ export type GameState = {
   discipleSeq: number;
   // 外门人数不入状态：外门弟子只是数字，总数恒等于当前宗门等级的外门上限（sectLimitsFor），
   // 开局即满员、升阶即扩容；在岗分工见 outerJobs 与 jobs[...].assignedOuter。
-  /** 外门分工：挖矿/练气在编人数（丹房/器坊投入在 jobs[...].assignedOuter；旧档缺省 = 全员供奉）。 */
+  /** 外门分工：挖矿/练气在编人数（丹房/器坊投入在 jobs[...].assignedOuter；旧档缺省 = 未分岗）。 */
   outerJobs?: OuterJobsState;
   /** 在册内门弟子（有名有姓、可战斗修炼管理；外门不入此册）。 */
   disciples: Disciple[];
@@ -206,7 +218,9 @@ export function emptyLibrary(): SectLibrary {
 /**
  * 旧档迁移：外门个体名册 → 外门恒满员口径（外门弟子只是数字，总数恒等于宗门等级上限）。
  * - 残留的 role 字段自弟子身上剥离（新口径全员内门，字段已废除）；
- * - 旧档的 outerCount 字段（初始 20/流动计数时代）删除——总数改为按 sectRank 派生，不入状态。
+ * - 旧档的 outerCount 字段（初始 20/流动计数时代）删除——总数改为按 sectRank 派生，不入状态；
+ * - 装备法宝化（2026-09-09 三）：仓库条目与已穿戴的档位数字 → 该档代表法宝 id（已是 id 幂等原样），
+ *   在炉法宝任务剥离旧档 slot/tier（出炉改为目录十件随机其一）。
  * 新局状态本就是新口径，迁移为幂等空操作。
  */
 export function migrateGameState(raw: Readonly<GameState>): GameState {
@@ -229,6 +243,49 @@ export function migrateGameState(raw: Readonly<GameState>): GameState {
         const { role: _obsoleteRole, ...rest } = disciple as Disciple & { role?: string };
         return rest as Disciple;
       });
+  }
+  // 旧档档位数字（1–4）→ 该档代表法宝 id；字符串 id 原样保留（幂等）。
+  const treasureIdOf = (value: unknown): string | undefined => {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" && GEAR_TIERS.includes(value as GearTier)) {
+      return representativeTreasureOfTier(value as GearTier).id;
+    }
+    return undefined;
+  };
+  if (state.warehouse) {
+    state.warehouse.gear = state.warehouse.gear.flatMap((item) => {
+      const raw = item as { treasureId?: unknown; tier?: unknown };
+      const treasureId = treasureIdOf(raw.treasureId ?? raw.tier);
+      return treasureId ? [{ slot: item.slot, treasureId }] : [];
+    });
+  }
+  const migrateEquipped = (equipped: EquippedGear): EquippedGear => {
+    for (const slot of GEAR_SLOT_KEYS) {
+      const migrated = treasureIdOf(equipped[slot]);
+      if (migrated !== undefined) equipped[slot] = migrated;
+      else Reflect.deleteProperty(equipped, slot);
+    }
+    return equipped;
+  };
+  for (const disciple of state.disciples) {
+    if (disciple.equippedGear) disciple.equippedGear = migrateEquipped(disciple.equippedGear);
+  }
+  if (state.rival) {
+    for (const disciple of state.rival.disciples) {
+      if (disciple.equippedGear) disciple.equippedGear = migrateEquipped(disciple.equippedGear);
+    }
+  }
+  // 在炉法宝任务：旧档 slot/tier 剥离（进度保留；出炉改十件随机其一）。
+  const gearTask = (state.jobs?.gear?.task ?? null) as {
+    kind?: unknown;
+    accumulatedPoints?: unknown;
+  } | null;
+  if (gearTask && gearTask.kind === "gear") {
+    const accumulatedPoints =
+      typeof gearTask.accumulatedPoints === "number" && Number.isFinite(gearTask.accumulatedPoints)
+        ? gearTask.accumulatedPoints
+        : 0;
+    if (state.jobs?.gear) state.jobs.gear.task = { kind: "gear", accumulatedPoints };
   }
   return state;
 }

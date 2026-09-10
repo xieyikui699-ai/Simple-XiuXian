@@ -6,17 +6,17 @@ import { type BattleFighter, type BattleReport, runBattle } from "./battle.js";
 //   deterministicRoll(`${state.seed}:expedition:${turn}`)
 //   区间 [0,50) 收获 / [50,65) 切磋 / [65,75) 掠夺 / [75,85) 奇遇 / [85,95) 危险 / [95,100) 丹药奇缘。
 import {
-  GEAR_SLOT_DISPLAY_NAMES,
-  GEAR_SLOT_KEYS,
   type GearSlot,
-  type GearTier,
   PILLS,
   SPELLS,
   TECHNIQUES,
+  TREASURES,
   getSpellById,
+  treasureEffectDescription,
 } from "./catalog.js";
 import { buildCombatProfile } from "./combat-profile.js";
 import { deterministicRoll } from "./hash.js";
+import { realmStageForLevel } from "./realms.js";
 import type { Disciple, GameState } from "./state.js";
 
 // ─── 六事件表（设计 §历练与遭遇 概率列）─────────────────────────────────
@@ -94,7 +94,7 @@ export type ExpeditionBattle = {
 export type ExpeditionReward =
   | { type: "gongfa_book"; techniqueId: string }
   | { type: "spell_book"; spellId: string }
-  | { type: "gear"; slot: GearSlot; tier: GearTier }
+  | { type: "gear"; slot: GearSlot; treasureId: string }
   | { type: "pill"; pillId: string };
 
 export type ExpeditionNote = {
@@ -144,6 +144,7 @@ export function combatReadyDisciples(state: Readonly<GameState>, turn: number): 
   }
   if (state.elders?.resource) occupied.add(state.elders.resource);
   if (state.elders?.war) occupied.add(state.elders.war);
+  if (state.elders?.mine) occupied.add(state.elders.mine);
   return state.disciples.filter(
     (disciple) =>
       !occupied.has(disciple.id) && !(disciple.injury && disciple.injury.untilTurn >= turn),
@@ -173,6 +174,7 @@ function toBattleFighter(disciple: Disciple): BattleFighter {
     rootElements: disciple.rootElements,
     spells,
     plan: spells.map((spell) => ({ kind: "spell" as const, spellId: spell.id })),
+    realm: realmStageForLevel(disciple.realmLevel).name,
   };
 }
 
@@ -388,6 +390,11 @@ function harvestReport(
   };
 }
 
+/**
+ * 奇遇掉落分支（2026-09-10 按玩家口径调低功法）：功法书 10% / 法术书 33% / 法宝 57%。
+ * 原三分均分 34/33/33——功法研读后消耗书册且每弟子限 1 门，34% 入阁过快致藏经阁堆书，
+ * 故功法分支降至 10%（月度综合掉功法率 10% 奇遇 × 10% ≈ 1%，原 3.4%），余量归法宝。
+ */
 function windfallReport(
   state: Readonly<GameState>,
   input: SettleExpeditionInput,
@@ -397,7 +404,7 @@ function windfallReport(
   const branchRoll = deterministicRoll(`${rollBase}:windfall`);
   let reward: ExpeditionReward;
   let rewardText: string;
-  if (branchRoll < 34) {
+  if (branchRoll < 10) {
     const candidates = TECHNIQUES.filter(
       (technique) => !library.techniqueIds.includes(technique.id),
     );
@@ -413,7 +420,7 @@ function windfallReport(
       reward = gear.reward;
       rewardText = gear.text;
     }
-  } else if (branchRoll < 67) {
+  } else if (branchRoll < 43) {
     const candidates = SPELLS.filter((spell) => !library.spellIds.includes(spell.id));
     const picked =
       candidates.length > 0
@@ -445,13 +452,13 @@ function windfallReport(
 }
 
 function rollGearReward(rollBase: string): { reward: ExpeditionReward; text: string } {
-  const slot = GEAR_SLOT_KEYS[
-    pickIndex(`${rollBase}:windfall:gear-slot`, GEAR_SLOT_KEYS.length)
-  ] as GearSlot;
-  const tier: GearTier = deterministicRoll(`${rollBase}:windfall:gear-tier`) < 50 ? 1 : 2;
+  // 掉落池：目录十件中品阶 1–2 的六种法宝随机其一（沿用旧「档 1–2」掉落带）。
+  const pool = TREASURES.filter((treasure) => treasure.tier <= 2);
+  const treasure = pool[pickIndex(`${rollBase}:windfall:gear`, pool.length)] ?? pool[0];
+  if (!treasure) throw new Error("treasure_catalog_empty");
   return {
-    reward: { type: "gear", slot, tier },
-    text: `获赠${GEAR_SLOT_DISPLAY_NAMES[slot]}（档${tier}），已存入仓库`,
+    reward: { type: "gear", slot: "talisman", treasureId: treasure.id },
+    text: `获赠法宝「${treasure.name}」（${treasureEffectDescription(treasure)}），已存入仓库`,
   };
 }
 

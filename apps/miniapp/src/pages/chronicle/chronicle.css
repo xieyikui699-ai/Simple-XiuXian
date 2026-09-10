@@ -80,44 +80,35 @@
   padding: 10rpx 6rpx;
 }
 
-.replay-row {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 10rpx;
+/* 文字战报：主句 / 回合分隔 / 状态明细三级行。 */
+.replay-line {
+  display: block;
   font-size: 24rpx;
+  line-height: 1.5;
+  color: var(--text);
 }
 
-.replay-round {
-  width: 56rpx;
+.replay-line-round {
+  margin-top: 8rpx;
+  font-size: 22rpx;
   color: var(--muted);
 }
 
-.replay-side-A {
-  color: #7a5a12;
-}
-
-.replay-side-B {
-  color: #8c4a3c;
-}
-
-.replay-kind {
-  color: var(--ink-2);
-}
-
-.replay-detail {
-  flex: 1;
-}
-
-.replay-hp {
+.replay-line-note {
+  padding-left: 20rpx;
+  font-size: 22rpx;
   color: var(--muted);
 }
 
-.replay-notes {
-  display: flex;
-  flex-direction: column;
-  gap: 4rpx;
-  padding: 10rpx;
-  background: var(--card-2);
-  border-radius: 10rpx;
+/* 战报人名着色：我方（A）绿、对方（B）红。 */
+.replay-name {
+  font-weight: 600;
+}
+
+.replay-name-own {
+  color: var(--green);
+}
+
+.replay-name-enemy {
+  color: var(--red);
 }

@@ -60,6 +60,8 @@ export type BattleFighter = {
   spells: readonly BattleSpell[];
   /** 确定性行动脚本：每次行动按序循环取用。 */
   plan: readonly BattlePlanEntry[];
+  /** 境界显示名（如「练气后期」）：只进战报展示，不参与结算；缺省 = 不显示。 */
+  realm?: string;
 };
 
 export type BattleSide = "A" | "B";
@@ -99,6 +101,8 @@ export type BattleReport = {
   /** 实际进行回合数（平局 = 30）。 */
   rounds: number;
   fighters: { A: string; B: string };
+  /** 双方境界显示名（随参战者 realm 记录；旧档无此字段，UI 缺省不显示）。 */
+  realms?: { A?: string; B?: string };
   actions: BattleActionEntry[];
   /** 双方造成的名义伤害合计（会战 1:1:1 平局比总伤害的输入）。 */
   totalDamage: { A: number; B: number };
@@ -551,6 +555,7 @@ export function runBattle(
     winner: result,
     rounds,
     fighters: { A: attacker.name, B: defender.name },
+    realms: attacker.realm || defender.realm ? { A: attacker.realm, B: defender.realm } : undefined,
     actions,
     totalDamage,
     injuries,

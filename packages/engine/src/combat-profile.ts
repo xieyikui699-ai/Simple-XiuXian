@@ -37,16 +37,24 @@ export const MAX_CRIT_RATE = 50;
 export type CombatProfileInput = {
   realmLevel: number;
   attributes: DiscipleAttributes;
-  /** 法宝法威平加（法宝档 1–4 → 8/14/22/32）。 */
+  /** 法宝法威平加（目录 TREASURES，如混沌钟 +32）。 */
   artifactMagic?: number;
   /** 天赋先攻平加（迅雷之势 +3）。 */
   firstStrikeFlat?: number;
   /** 先攻状态修正（减速 −5，由战斗引擎传入）。 */
   firstStrikeModifier?: number;
-  /** 天赋暴击平加（锋芒毕露 +8）。 */
+  /** 暴击率平加（百分点；天赋锋芒毕露 +8 / 法宝紫雷梭 +8）。 */
   critFlat?: number;
-  /** 功法防御平加（厚土诀 +5，在取整之外直接加值）。 */
+  /** 防御平加（功法厚土诀 +5，在取整之外直接加值）。 */
   defenseFlat?: number;
+  /** 法宝防御百分比加成（百分点，乘等级乘区基础派生值，如黄泉幡 +50%）。 */
+  defensePct?: number;
+  /** 法宝物理攻击平加。 */
+  attackFlat?: number;
+  /** 法宝物理攻击百分比加成（百分点，乘等级乘区基础派生值，如离火扇 +35%）。 */
+  attackPct?: number;
+  /** 法宝最大生命平加（山河鼎 +500）。 */
+  maxHpFlat?: number;
   /** 天赋吸血聚合（百分点）。 */
   lifestealPct?: number;
   /** 天赋状态抗性聚合（百分点）。 */
@@ -76,11 +84,14 @@ export function deriveCombatProfile(input: CombatProfileInput): CombatProfile {
     maxHp:
       COMBAT_BASE_HP +
       attributes.physique * HP_PHYSIQUE_PER_LEVEL * level +
-      (level - 1) * HP_PER_EXTRA_REALM_LEVEL,
+      (level - 1) * HP_PER_EXTRA_REALM_LEVEL +
+      (input.maxHpFlat ?? 0),
     physicalAttack: Math.round(
-      ATTACK_BASE +
+      (ATTACK_BASE +
         (attributes.strength / ATTACK_STRENGTH_DIVISOR) * level +
-        (level - 1) * ATTACK_FLAT_PER_REALM_LEVEL,
+        (level - 1) * ATTACK_FLAT_PER_REALM_LEVEL) *
+        (1 + (input.attackPct ?? 0) / 100) +
+        (input.attackFlat ?? 0),
     ),
     magicPower:
       Math.round(
@@ -89,10 +100,13 @@ export function deriveCombatProfile(input: CombatProfileInput): CombatProfile {
           (level - 1) * MAGIC_FLAT_PER_REALM_LEVEL,
       ) + (input.artifactMagic ?? 0),
     defense:
-      Math.floor(
-        DEFENSE_BASE +
-          (attributes.physique / DEFENSE_PHYSIQUE_DIVISOR) * level +
-          (level - 1) * DEFENSE_FLAT_PER_REALM_LEVEL,
+      Math.round(
+        Math.floor(
+          DEFENSE_BASE +
+            (attributes.physique / DEFENSE_PHYSIQUE_DIVISOR) * level +
+            (level - 1) * DEFENSE_FLAT_PER_REALM_LEVEL,
+        ) *
+          (1 + (input.defensePct ?? 0) / 100),
       ) + (input.defenseFlat ?? 0),
     firstStrike:
       attributes.agility + (input.firstStrikeFlat ?? 0) + (input.firstStrikeModifier ?? 0),
@@ -117,6 +131,7 @@ export type CombatAttributeBreakdown = {
   base: DiscipleAttributes;
   talentFlat: DiscipleAttributes;
   artFlat: Partial<DiscipleAttributes>;
+  gearFlat: Partial<DiscipleAttributes>;
   /** clamp(1, 100) 后的有效五维；派生公式一律取有效值。 */
   effective: DiscipleAttributes;
 };
@@ -148,7 +163,9 @@ export function buildCombatProfile(
   const base = { ...disciple.attributes };
   const effective = {} as DiscipleAttributes;
   for (const key of ATTRIBUTE_KEYS) {
-    effective[key] = clampAttribute(base[key] + talentFlat[key] + (artFlat[key] ?? 0));
+    effective[key] = clampAttribute(
+      base[key] + talentFlat[key] + (artFlat[key] ?? 0) + (gear.attributeFlat[key] ?? 0),
+    );
   }
 
   let talentFirstStrikeFlat = 0;
@@ -163,6 +180,7 @@ export function buildCombatProfile(
     lifestealPct += combat.lifestealPct ?? 0;
     statusResistPct += combat.statusResistPct ?? 0;
   }
+  critFlat += gear.critFlat;
 
   const profile = deriveCombatProfile({
     realmLevel: disciple.realmLevel,
@@ -171,14 +189,18 @@ export function buildCombatProfile(
     firstStrikeFlat: talentFirstStrikeFlat,
     firstStrikeModifier: options.speedModifier ?? 0,
     critFlat,
-    defenseFlat: artDefenseFlat,
+    defenseFlat: artDefenseFlat + gear.defenseFlat,
+    defensePct: gear.defensePct,
+    attackFlat: gear.attackFlat,
+    attackPct: gear.attackPct,
+    maxHpFlat: gear.maxHpFlat,
     lifestealPct,
     statusResistPct,
   });
   return {
     ...profile,
     breakdown: {
-      attributes: { base, talentFlat, artFlat, effective },
+      attributes: { base, talentFlat, artFlat, gearFlat: gear.attributeFlat, effective },
       gear,
       artDefenseFlat,
       talentFirstStrikeFlat,
