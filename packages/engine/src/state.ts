@@ -49,8 +49,14 @@ export type Disciple = {
   equippedGear?: EquippedGear;
   /** 聚灵丹增益：该回目（含）之前真元获取 ×1.5；重复服用倍率不叠加、时长在剩余月数上累加。 */
   spiritFocusUntilTurn?: number;
+  /** 自动服用延寿丹：剩余寿命 ≤30 年时月结自动从仓库服用（弟子详情勾选，随档持久化）。 */
+  autoPillYanshou?: boolean;
+  /** 自动服用聚灵丹：增益失效（未服/到期）时月结自动从仓库续服（弟子详情勾选，随档持久化）。 */
+  autoPillJuling?: boolean;
   /** 未愈伤势；缺省 = 无伤（旧档兼容）。 */
   injury?: Injury;
+  /** 招募来源候选 id（cand-<窗口>-<槽位>）；用于本批候选去重（招一个少一个）。旧档缺省 = 无。 */
+  fromCandidate?: string;
 };
 
 export type ChronicleKind = "normal" | "milestone" | "warning";
@@ -61,7 +67,7 @@ export type ChronicleEntry = {
   text: string;
 };
 
-export type EndingKind = "annexation" | "annexed" | "bankrupt";
+export type EndingKind = "annexation" | "nascent_soul" | "annexed" | "bankrupt";
 
 /** 仙途评级四档（设计 §胜负与结局评价；阈值见 settlement.ENDING_RATING_THRESHOLDS）。 */
 export type EndingRating = "甲" | "乙" | "丙" | "丁";
@@ -189,8 +195,6 @@ export type GameState = {
   warDeclaredTurn?: number;
   /** 冷却结束回目（≥ 该回目方可再次宣战；自宣战月起算 12 个月）。 */
   warCooldownEndsTurn?: number;
-  /** 玩家指定的会战出战弟子 id（至多 3；缺省自动选最强 3）。 */
-  warParty?: string[];
   /** 会战记录（最新在前；UI 会战记录页消费）。 */
   sectWars?: SectWarRecord[];
   /** 凋敝计数：内门 0 且灵石不足招募费的连续月数（≥6 触发凋敝结局）。 */

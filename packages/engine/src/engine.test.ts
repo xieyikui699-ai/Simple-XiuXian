@@ -13,6 +13,7 @@ import {
   listRecruitCandidates,
   recruitDisciple,
   removeElder,
+  setAutoPill,
   upgradeSect,
   usePill,
   wearGear,
@@ -24,6 +25,7 @@ import { assignWorkshopJob } from "./production.js";
 import { realmStageForLevel } from "./realms.js";
 import { declareWar } from "./rival.js";
 import { ROOT_MULTIPLIERS } from "./roots.js";
+import { RECRUIT_CANDIDATE_COUNT, RECRUIT_REFRESH_TURNS } from "./sect.js";
 import {
   BATTLE_LOG_BYTE_BUDGET,
   BATTLE_LOG_LIMIT,
@@ -38,7 +40,7 @@ import {
 } from "./settlement.js";
 import type { GameState, SettlementResult } from "./state.js";
 import { migrateGameState } from "./state.js";
-import { talentsAttributeFlat, talentsZhenyuanPct } from "./talents.js";
+import { talentsAttributeFlat, talentsLifespanFlat, talentsZhenyuanPct } from "./talents.js";
 
 function newGame(seed = "slice-seed-1"): GameState {
   return createGame({ seed, sectName: "青云门" });
@@ -280,17 +282,37 @@ describe("月度结算", () => {
     }
   });
 
-  it("元婴前期圆满止步：不再积累真元、不再突破，月结照常推进", () => {
+  it("元婴胜利：门下有元婴期弟子即胜利；圆满弟子不再积累真元、不再突破", () => {
     const state = newGame();
     const disciple = discipleOf(state, "d-1");
     disciple.realmLevel = 10;
     disciple.realm = realmStageForLevel(10).realm;
     disciple.zhenyuan = 999_999;
     const { state: after, result } = settleMonthly(state);
-    assert.equal(after.ending, undefined);
+    assert.equal(after.ending?.kind, "nascent_soul");
+    assert.ok(after.ending);
+    assert.ok(after.ending.text.includes(disciple.name));
+    assert.ok(after.ending.rating);
     assert.ok(!result.breakthroughs.some((entry) => entry.discipleId === "d-1"));
     assert.equal(discipleOf(after, "d-1").zhenyuan, 999_999);
-    assert.equal(settleMonthly(after).state.ending, undefined);
+    assert.throws(() => settleMonthly(after), /game_already_ended/);
+  });
+
+  it("元婴胜利：弟子当月真实突破至元婴前期即落胜利结局", () => {
+    const state = newGame();
+    const disciple = discipleOf(state, "d-1");
+    disciple.realmLevel = 9;
+    disciple.realm = realmStageForLevel(9).realm;
+    disciple.zhenyuan = 500_000;
+    disciple.techniqueId = "tech-yangqi"; // 功法突破 +3
+    disciple.breakthroughFailures = 18; // 连败加成 18×5 → 成功率封顶 100，必成
+    const { state: after, result } = settleMonthly(state);
+    const event = result.breakthroughs.find((entry) => entry.discipleId === "d-1");
+    assert.ok(event);
+    assert.equal(event.outcome, "success");
+    assert.equal(event.toRealmLevel, 10);
+    assert.equal(after.ending?.kind, "nascent_soul");
+    assert.ok(after.ending?.text.includes(disciple.name));
   });
 
   it("年度坐化：逝者入名录、士气扣减、新弟子递补席位", () => {
@@ -327,7 +349,7 @@ describe("管理命令", () => {
   it("招募候选确定、直入名册并扣灵石", () => {
     const state = newGame();
     const candidates = listRecruitCandidates(state);
-    assert.equal(candidates.length, 3);
+    assert.equal(candidates.length, RECRUIT_CANDIDATE_COUNT);
     assert.deepEqual(candidates, listRecruitCandidates(state));
     const first = candidates[0];
     assert.ok(first);
@@ -338,7 +360,7 @@ describe("管理命令", () => {
     assert.equal(disciple.age, 16);
   });
 
-  it("招募录入所选候选本人（3 选 1 的选择生效，预览即录入档案）", () => {
+  it("招募录入所选候选本人（候选 5 选 1 的选择生效，预览即录入档案）", () => {
     const state = newGame();
     const candidates = listRecruitCandidates(state);
     const second = candidates[1];
@@ -362,6 +384,33 @@ describe("管理命令", () => {
     );
   });
 
+  it("招募一人后本批候选只少一人，其余原样保留（不重掷）", () => {
+    const state = newGame();
+    const before = listRecruitCandidates(state);
+    const first = before[0];
+    assert.ok(first);
+    const { state: after, disciple } = recruitDisciple(state, first.candidateId);
+    assert.equal(disciple.fromCandidate, first.candidateId);
+    // 其余候选连人带档案原样保留（预览即档案，跨招募不变）
+    assert.deepEqual(listRecruitCandidates(after), before.slice(1));
+    // 已招候选在本窗口内不得再次出现/再次招募
+    assert.throws(() => recruitDisciple(after, first.candidateId), /candidate_not_found/);
+  });
+
+  it("每 120 个月（10 年）整批刷新新候选", () => {
+    const state = newGame();
+    const before = listRecruitCandidates(state);
+    const { state: advanced } = runMonths(state, RECRUIT_REFRESH_TURNS);
+    const next = listRecruitCandidates(advanced);
+    assert.equal(next.length, RECRUIT_CANDIDATE_COUNT);
+    const beforeNames = new Set(before.map((entry) => entry.disciple.name));
+    for (const entry of next) {
+      // 新窗口候选：id 与档案（姓名等）均为全新一批
+      assert.ok(entry.candidateId.startsWith("cand-1-"));
+      assert.ok(!beforeNames.has(entry.disciple.name));
+    }
+  });
+
   it("灵石不足招募被拒", () => {
     const state = { ...structuredClone(newGame()), spiritStones: 100 };
     const first = listRecruitCandidates(state)[0];
@@ -372,12 +421,22 @@ describe("管理命令", () => {
   it("招募受内门上限约束（补满至 10 人后拒绝再招募）", () => {
     let state = { ...structuredClone(newGame()), spiritStones: 100_000 };
     while (state.disciples.length < 10) {
-      const first = listRecruitCandidates(state)[0];
+      // 批内候选耗尽则推进到下一刷新窗口（10 年一批，每批 5 人）
+      const batch = listRecruitCandidates(state);
+      if (batch.length === 0) {
+        state = runMonths(state, RECRUIT_REFRESH_TURNS).state;
+        continue;
+      }
+      const first = batch[0];
       assert.ok(first);
       state = recruitDisciple(state, first.candidateId).state;
     }
     assert.equal(state.disciples.length, 10);
-    const overflow = listRecruitCandidates(state)[0];
+    let overflow = listRecruitCandidates(state)[0];
+    if (!overflow) {
+      state = runMonths(state, RECRUIT_REFRESH_TURNS).state;
+      overflow = listRecruitCandidates(state)[0];
+    }
     assert.ok(overflow);
     assert.throws(() => recruitDisciple(state, overflow.candidateId), /inner_limit_reached/);
   });
@@ -445,16 +504,17 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
     assert.throws(() => learnArt(state, "d-2", "art-none"), /art_not_found/);
   });
 
-  it("研读功法消耗书册：书自藏经阁消失，他人不可再研；法术不耗书", () => {
+  it("研读功法/法术均消耗书册：书自藏经阁消失，他人不可再研", () => {
     let state = gameWithLibrary();
     state = learnArt(state, "d-1", "tech-hunyuan").state;
     // 混元功书册消耗，养气诀仍在阁。
     assert.deepEqual(state.library?.techniqueIds, ["tech-yangqi"]);
     // 已耗的书他人研读被拒（历练奇遇可再得，故非「已修」类错误）。
     assert.throws(() => learnArt(state, "d-2", "tech-hunyuan"), /art_not_in_library/);
-    // 法术研读不耗书：三门法术书仍在阁。
+    // 法术研读同样耗书：金锋斩书册消耗，余两本仍在阁。
     state = learnArt(state, "d-2", "spell-jinfeng").state;
-    assert.deepEqual(state.library?.spellIds, ["spell-jinfeng", "spell-hanbing", "spell-yanbao"]);
+    assert.deepEqual(state.library?.spellIds, ["spell-hanbing", "spell-yanbao"]);
+    assert.throws(() => learnArt(state, "d-1", "spell-jinfeng"), /art_not_in_library/);
   });
 
   it("功法月结生效：混元功真元 +15%、五维 +2 计入月度真元", () => {
@@ -530,6 +590,107 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
     const { state: after2 } = settleMonthly(after);
     assert.equal(after2.currentTurn, 3);
     assert.equal(monthlyZhenyuanGain(after2, discipleOf(after2, "d-1")), base);
+  });
+
+  it("setAutoPill 开关：落档/关断置 undefined；非法丹药 id、未知弟子拒", () => {
+    const state = newGame();
+    const { state: after, disciple } = setAutoPill(state, "d-1", "pill-yanshou", true);
+    assert.equal(disciple.autoPillYanshou, true);
+    assert.equal(discipleOf(after, "d-1").autoPillYanshou, true);
+    const { state: off } = setAutoPill(after, "d-1", "pill-yanshou", false);
+    assert.equal(discipleOf(off, "d-1").autoPillYanshou, undefined);
+    const { state: both } = setAutoPill(state, "d-2", "pill-juling", true);
+    assert.equal(discipleOf(both, "d-2").autoPillJuling, true);
+    assert.throws(() => setAutoPill(state, "d-1", "pill-unknown", true), /pill_not_found/);
+    assert.throws(() => setAutoPill(state, "d-99", "pill-yanshou", true), /disciple_not_found/);
+  });
+
+  it("自动服用聚灵丹：月结开头自动续服（当月真元即 ×1.5）、库存不足静默跳过", () => {
+    const state = newGame();
+    state.warehouse = { gear: [], pills: [{ pillId: "pill-juling", count: 1 }] };
+    const d1 = discipleOf(state, "d-1");
+    d1.autoPillJuling = true;
+    const base = monthlyZhenyuanGain(state, d1);
+    const { state: after } = settleMonthly(state);
+    const after1 = discipleOf(after, "d-1");
+    // 月结开头自动服：自 turn 2 起算 12 月（2+12），当月真元增速即按 ×1.5 落账。
+    assert.equal(after1.spiritFocusUntilTurn, 2 + 12);
+    const buffGain = monthlyZhenyuanGain(after, after1);
+    assert.equal(buffGain, Math.round(base * 1.5));
+    if (after1.realmLevel === d1.realmLevel) {
+      assert.equal(after1.zhenyuan, d1.zhenyuan + buffGain);
+    }
+    // 仓库唯一一枚被自动服掉；未勾选的 d-2/d-3 不受影响。
+    assert.deepEqual(after.warehouse?.pills, []);
+    assert.equal(discipleOf(after, "d-2").spiritFocusUntilTurn, undefined);
+    assert.ok(
+      after.chronicle.some((entry) => entry.text.includes("自动服用聚灵丹")),
+      "自动服用应落纪事",
+    );
+    // 库存不足：勾选开着但仓库无丹药，月结照常（不抛错、不生效）。
+    const empty = newGame();
+    discipleOf(empty, "d-1").autoPillJuling = true;
+    const { state: afterEmpty } = settleMonthly(empty);
+    assert.equal(discipleOf(afterEmpty, "d-1").spiritFocusUntilTurn, undefined);
+  });
+
+  it("自动服用聚灵丹：增益到期次月自动接上，无空窗月（30 月恰耗 3 枚）", () => {
+    const state = newGame();
+    state.warehouse = { gear: [], pills: [{ pillId: "pill-juling", count: 6 }] };
+    discipleOf(state, "d-1").autoPillJuling = true;
+    let current = state;
+    for (let month = 0; month < 30; month++) {
+      current = settleMonthly(current).state;
+      const d = discipleOf(current, "d-1");
+      if (d.spiritFocusUntilTurn !== undefined) {
+        assert.ok(
+          d.spiritFocusUntilTurn >= current.currentTurn,
+          `第 ${current.currentTurn} 月增益不应出现空窗`,
+        );
+      }
+    }
+    // turn 2 服至 14、turn 15 服至 27、turn 28 服至 40：30 个月内恰自动服 3 枚
+    //（按纪事计数；仓库库存受历练掉落丹药扰动，不作断言依据）。
+    const autoConsumed = current.chronicle.filter(
+      (entry) => entry.text.includes("自动服用聚灵丹") && entry.turn <= current.currentTurn,
+    ).length;
+    assert.equal(autoConsumed, 3);
+  });
+
+  it("自动服用延寿丹：剩余寿命 ≤30 年时月结自动服 1 枚；>30 年不空耗", () => {
+    const setup = (ageOffset: number) => {
+      const base = newGame();
+      base.warehouse = { gear: [], pills: [{ pillId: "pill-yanshou", count: 1 }] };
+      const d1 = discipleOf(base, "d-1");
+      d1.autoPillYanshou = true;
+      // 按有效坐化年龄（含天赋寿命平加）设定年龄，避免天赋口径漂移。
+      d1.age = d1.maxLifespan + talentsLifespanFlat(d1.talentIds) - ageOffset;
+      return base;
+    };
+    // 剩余 29 年（≤30）：自动服 1 枚。对照组（不勾选）同一 seed 同月结，差异应恰为 +30 年。
+    const state = setup(29);
+    const mirror = structuredClone(state);
+    discipleOf(mirror, "d-1").autoPillYanshou = undefined;
+    const withAuto = settleMonthly(state).state;
+    const withoutAuto = settleMonthly(mirror).state;
+    const autoDisciple = discipleOf(withAuto, "d-1");
+    assert.equal(autoDisciple.maxLifespan, discipleOf(withoutAuto, "d-1").maxLifespan + 30);
+    assert.deepEqual(withAuto.warehouse?.pills, []);
+    assert.ok(
+      withAuto.chronicle.some((entry) => entry.text.includes("自动服用延寿丹")),
+      "自动服用应落纪事",
+    );
+    // 剩余 31 年（>30）：勾选也服不动——对照组（不勾选）同月结，最大寿命应一致、库存原样。
+    const state2 = setup(31);
+    const mirror2 = structuredClone(state2);
+    discipleOf(mirror2, "d-1").autoPillYanshou = undefined;
+    const withAuto2 = settleMonthly(state2).state;
+    const withoutAuto2 = settleMonthly(mirror2).state;
+    assert.equal(
+      discipleOf(withAuto2, "d-1").maxLifespan,
+      discipleOf(withoutAuto2, "d-1").maxLifespan,
+    );
+    assert.deepEqual(withAuto2.warehouse?.pills, [{ pillId: "pill-yanshou", count: 1 }]);
   });
 
   it("穿戴法宝：仓库取出、旧法宝卸下回仓、单项效果进入派生（五维/先攻/防御）", () => {
@@ -701,9 +862,9 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
     assert.throws(() => removeElder(removed.state, "mine"), /elder_job_not_held/);
   });
 
-  it("岗位/长老占用者不历练：会战名册同口径排除（自动选将取最强，构造占用者为全宗最强）", () => {
+  it("会战全军出动：岗位/长老占用者照常出战（全员按战力降序同序配对，构造占用者为全宗最强）", () => {
     let state = createGame({ seed: "war-job-exclusion", sectName: "青云门", rivalName: "玄阴宗" });
-    // 任命 d-1 为长老并置为全宗最强：若名册排除失效，自动选将必先选 d-1。
+    // 任命 d-1 为长老并置为全宗最强：全军出动口径下 d-1 必列首位对位。
     state = appointElder(state, "d-1", "resource").state;
     const holder = discipleOf(state, "d-1");
     holder.realmLevel = 8;
@@ -713,8 +874,9 @@ describe("M2 管理命令：研读功法法术 / 穿戴装备 / 服用丹药 / �
     assert.ok(result.war, "宣战次月应结算会战");
     const fighters = result.war.pairOutcomes.map((entry) => entry.playerFighterId);
     assert.ok(fighters.length > 0, "我方应有出战弟子");
-    // 唯一占用者 d-1（全宗最强）不入会战名册，其余 2 名无职弟子照常入选。
-    assert.deepEqual([...fighters].sort(), ["d-2", "d-3"]);
+    // 全宗 3 名内门全员出战（含长老 d-1），按战力降序 d-1 领衔。
+    assert.equal(fighters[0], "d-1");
+    assert.deepEqual([...fighters].sort(), ["d-1", "d-2", "d-3"]);
   });
 
   it("战备长老：全门突破率 +3 月结生效（边界 seed 扫描锁定）", () => {

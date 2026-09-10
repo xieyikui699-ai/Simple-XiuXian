@@ -23,7 +23,7 @@ import type { RootElement } from "./roots.js";
 
 /** 命中率 90 固定（百分点）。 */
 export const HIT_RATE = 90;
-/** 暴伤倍率：暴击对取整后基础伤害再 ×2。 */
+/** 暴伤倍率：暴击对取整后基础伤害再 ×2（仅普通攻伐可暴击，法术不掷暴击骰）。 */
 export const CRIT_MULTIPLIER = 2;
 /** 普通攻伐倍率（物理 1.0×）。 */
 export const BASIC_ATTACK_MULTIPLIER = 1;
@@ -75,6 +75,7 @@ export type BattleActionEntry = {
   kind: BattleActionKind;
   spellId?: string;
   hit?: boolean;
+  /** 暴击标记：仅普通攻伐（物理）可暴击，法术恒为 false。 */
   crit?: boolean;
   /** 名义伤害（普攻/法术：命中后按公式；灼烧：直接扣血值；未命中/跳过：0）。 */
   damage: number;
@@ -374,9 +375,11 @@ function performAttack(
   } else {
     hit = deterministicRoll(`${rollBase}:r${round}:${actorRt.side}:hit`) < HIT_RATE;
     if (hit) {
+      // 仅普通攻伐（物理）可暴击；法术不掷暴击骰，恒不暴击。
       crit =
+        kind === "basic" &&
         deterministicRoll(`${rollBase}:r${round}:${actorRt.side}:crit`) <
-        actorFighter.profile.critRate;
+          actorFighter.profile.critRate;
       damage = computeDamage({
         attack,
         multiplier,

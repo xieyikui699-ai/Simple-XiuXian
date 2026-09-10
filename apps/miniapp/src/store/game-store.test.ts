@@ -107,8 +107,8 @@ describe("管理命令 action（引擎命令接线）", () => {
     assert.deepEqual(store.getState().state?.jobs?.pill.workers, []);
   });
 
-  it("宣战 → 来月会战 → 三份战报可回放（1v1v1 逐回合记录）", () => {
-    // 选定首月历练为「收获」的 seed：历练月无战斗无伤势，保证会战 3v3 成阵。
+  it("宣战 → 来月全军会战 → 三份战报可回放（开局我方 3 人全员出战，逐回合记录）", () => {
+    // 选定首月历练为「收获」的 seed：历练月无战斗无伤势，保证开局 3v4 全员成阵（对手 4 人取前 3 配对）。
     let seed: string | undefined;
     for (let i = 0; i < 500 && !seed; i++) {
       const candidate = `war-${String(i).padStart(3, "0")}`;
@@ -154,5 +154,24 @@ describe("管理命令 action（引擎命令接线）", () => {
     store.clearError();
     store.appointElder(disciple.id, "resource");
     assert.equal(store.getState().state?.elders?.resource, disciple.id);
+  });
+
+  it("自动服用丹药开关：走引擎落档，关断后字段置空", () => {
+    const store = createGameStore();
+    store.newGame({ sectName: "自动服药宗门", seed: "mng-003", difficulty: "normal" });
+    const disciple = store.getState().state?.disciples.find((d) => d.id === "d-1");
+    assert.ok(disciple);
+    store.setAutoPill(disciple.id, "pill-yanshou", true);
+    store.setAutoPill(disciple.id, "pill-juling", true);
+    const autoOn = store.getState().state?.disciples.find((d) => d.id === disciple.id);
+    assert.equal(autoOn?.autoPillYanshou, true);
+    assert.equal(autoOn?.autoPillJuling, true);
+    store.setAutoPill(disciple.id, "pill-yanshou", false);
+    const autoOff = store.getState().state?.disciples.find((d) => d.id === disciple.id);
+    assert.equal(autoOff?.autoPillYanshou, undefined);
+    assert.equal(store.getState().errorMessage, null);
+    // 非法丹药 id 走可读错误。
+    store.setAutoPill(disciple.id, "pill-unknown", true);
+    assert.ok(store.getState().errorMessage?.includes("丹药"));
   });
 });

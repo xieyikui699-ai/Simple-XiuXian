@@ -9,7 +9,13 @@
 // ⑧ 第 12 月：年度衰老与坐化（长老随坐化自动卸任）
 // 纯函数：输入 GameState 返回新 GameState（内部 structuredClone），同输入恒同输出。
 import type { BattleReport } from "./battle.js";
-import { MAX_SPELLS_PER_DISCIPLE, SPELLS, type Spell, getTechniqueById } from "./catalog.js";
+import {
+  MAX_SPELLS_PER_DISCIPLE,
+  SPELLS,
+  type Spell,
+  getPillById,
+  getTechniqueById,
+} from "./catalog.js";
 import { buildCombatProfile } from "./combat-profile.js";
 import {
   type ExpeditionReport,
@@ -44,14 +50,11 @@ import {
 } from "./rival.js";
 import { ROOT_MULTIPLIERS } from "./roots.js";
 import {
-  SECT_WAR_FIGHTERS,
   type SectWarRecord,
   type WarEligibleDisciple,
   injuryMonthsLeftFor,
-  isWarEligible,
   runSectWar,
   sectWarRecord,
-  selectSectWarFighters,
 } from "./sect-war.js";
 import { INNER_SALARY_PER_DISCIPLE, RECRUIT_COST } from "./sect.js";
 import type {
@@ -101,6 +104,9 @@ export const EPIPHANY_CHANCE_PCT = 20;
 export const BATTLE_LOG_LIMIT = 30;
 /** 战报存档字节预算：序列化总量超预算时丢弃更旧战报（快照 <128KB 约束，设计 D-022）。 */
 export const BATTLE_LOG_BYTE_BUDGET = 45_000;
+
+/** 自动服用延寿丹阈值：剩余寿命（有效坐化年龄 − 当前年龄）≤30 年时月结自动服 1 枚（与丹药寿命增量同量级）。 */
+export const AUTO_PILL_YANSHOU_REMAINING_YEARS = 30;
 
 /**
  * 战报入库（最新在前）：先按条数上限截断，再按字节预算自旧向新丢弃；至少保留最新 1 条。
@@ -191,20 +197,6 @@ function appendChronicle(state: GameState, entry: ChronicleEntry): void {
   if (state.chronicle.length > CHRONICLE_LIMIT) state.chronicle.length = CHRONICLE_LIMIT;
 }
 
-/** 岗位/长老占用者：不历练（历练选将与会战名册均排除），修炼照常。 */
-function jobHolderIds(state: GameState): Set<string> {
-  const ids = new Set<string>();
-  if (state.jobs) {
-    for (const kind of CRAFT_JOB_KINDS) {
-      for (const workerId of state.jobs[kind].workers) ids.add(workerId);
-    }
-  }
-  if (state.elders?.resource) ids.add(state.elders.resource);
-  if (state.elders?.war) ids.add(state.elders.war);
-  if (state.elders?.mine) ids.add(state.elders.mine);
-  return ids;
-}
-
 /** 历练灵石收益加成：取全宗弟子中天赋 incomePct 聚合最高者（宗门级收获按最强福缘计）。 */
 function maxIncomePct(state: GameState): number {
   let max = 0;
@@ -287,6 +279,55 @@ function cleanupDeceasedElders(state: GameState): void {
   if (state.elders.mine && !alive.has(state.elders.mine)) state.elders.mine = undefined;
 }
 
+/**
+ * 自动服用丹药（月结开头执行，先于 ② 真元增长，聚灵丹当月即生效）：
+ * - 延寿丹：剩余寿命 ≤ AUTO_PILL_YANSHOU_REMAINING_YEARS 年自动服 1 枚（服后剩余 >30 年，不会月月空耗）；
+ * - 聚灵丹：增益失效（未服/已到期）时自动续服 1 枚，到期次月自动接上无空窗；圆满弟子不再积累真元，不消耗。
+ * 丹药从仓库共享库存按名册顺序消耗（库存不足则跳过），自动服用同样落纪事。
+ */
+function applyAutoPills(state: GameState, turn: number): void {
+  const warehouse = state.warehouse;
+  if (!warehouse) return;
+  const yanshou = getPillById("pill-yanshou");
+  const juling = getPillById("pill-juling");
+  if (!yanshou || !juling) return;
+  const consume = (pillId: string): boolean => {
+    const stock = warehouse.pills.find((entry) => entry.pillId === pillId);
+    if (!stock || stock.count <= 0) return false;
+    stock.count -= 1;
+    if (stock.count <= 0) {
+      warehouse.pills = warehouse.pills.filter((entry) => entry.pillId !== pillId);
+    }
+    return true;
+  };
+  for (const disciple of state.disciples) {
+    if (disciple.autoPillYanshou && yanshou.effect.lifespanFlat !== undefined) {
+      const deathAge = effectiveDeathAge(disciple, talentsLifespanFlat(disciple.talentIds));
+      if (deathAge - disciple.age <= AUTO_PILL_YANSHOU_REMAINING_YEARS && consume("pill-yanshou")) {
+        disciple.maxLifespan += yanshou.effect.lifespanFlat;
+        appendChronicle(state, {
+          turn,
+          kind: "normal",
+          text: `${disciple.name} 自动服用延寿丹，寿元绵长（最大寿命 +${yanshou.effect.lifespanFlat} 年）。`,
+        });
+      }
+    }
+    if (disciple.autoPillJuling && juling.effect.zhenyuanBuff !== undefined) {
+      const buff = juling.effect.zhenyuanBuff;
+      const buffActive =
+        disciple.spiritFocusUntilTurn !== undefined && disciple.spiritFocusUntilTurn >= turn;
+      if (disciple.realmLevel < TOP_REALM_LEVEL && !buffActive && consume("pill-juling")) {
+        disciple.spiritFocusUntilTurn = turn + buff.months;
+        appendChronicle(state, {
+          turn,
+          kind: "normal",
+          text: `${disciple.name} 自动服用聚灵丹，${buff.months} 月内真元获取 ×${buff.multiplier}。`,
+        });
+      }
+    }
+  }
+}
+
 export type SettleMonthlyOutcome = {
   state: GameState;
   result: SettlementResult;
@@ -340,6 +381,9 @@ export function settleMonthly(
   state.prestige = Math.max(0, state.prestige + prestigeDelta);
 
   // （外门自然流动已废除：外门恒按宗门等级上限满员，无来投/离去。）
+
+  // 自动服用丹药：勾选弟子按条件从仓库库存自动服（先于 ②，聚灵丹当月即计入真元增速）。
+  applyAutoPills(state, turn);
 
   // ② 真元增长与突破判定（名册全员内门；岗位/长老占用者照常修炼）。
   const warElderFlat = state.elders?.war ? WAR_ELDER_BREAKTHROUGH_FLAT : 0;
@@ -496,6 +540,7 @@ export function settleMonthly(
   let rivalRankUp: { from: number; to: number } | undefined;
   if (!state.ending && state.rival) {
     const previousRank = state.rival.sectRank;
+    const knownRivalIds = new Set(state.rival.disciples.map((disciple) => disciple.id));
     state.rival = advanceRivalSectMonthly(state.rival, turn);
     if (state.rival.sectRank !== previousRank) {
       rivalRankUp = { from: previousRank, to: state.rival.sectRank };
@@ -503,6 +548,19 @@ export function settleMonthly(
         turn,
         kind: "milestone",
         text: `情报：${state.rival.name} 晋升为${state.rival.sectRank === 2 ? "二" : "三"}级宗门！`,
+      });
+    }
+    // 对手招募情报（情报透明口径）：名册新增弟子逐一入编年史。
+    const rivalRecruits = state.rival.disciples.filter(
+      (disciple) => !knownRivalIds.has(disciple.id),
+    );
+    if (rivalRecruits.length > 0) {
+      appendChronicle(state, {
+        turn,
+        kind: "normal",
+        text: `情报：${state.rival.name} 新收内门弟子 ${rivalRecruits
+          .map((disciple) => disciple.name)
+          .join("、")}。`,
       });
     }
     // NPC 宣战判定：未开战且冷却已过时，声望差 >50 或其宗门等级更高 → 15%/月（sha256 掷骰）。
@@ -525,7 +583,7 @@ export function settleMonthly(
     }
   }
 
-  // ⑥ 会战结算（宣战次月触发）：选将 → 同序配对逐场 1v1 → 裁决 → 掠夺/声望/士气/伤势落账。
+  // ⑥ 会战结算（宣战次月触发）：全军同序配对逐位 1v1 → 裁决 → 掠夺/声望/士气/阵亡/伤势落账。
   let warRecord: SectWarRecord | undefined;
   if (
     !state.ending &&
@@ -539,29 +597,11 @@ export function settleMonthly(
       ...disciple,
       injuryMonthsLeft: injuryMonthsLeftFor(disciple, turn),
     });
-    // 我方出战名单：warParty 指定优先（须可出战），不足自动按最强 3 补齐；缺省全自动选将。
-    // 岗位/长老占用者不历练，不入会战名册（历练侧 combatReadyDisciples 同口径）。
-    const occupied = jobHolderIds(state);
-    const playerRoster = state.disciples
-      .filter((disciple) => !occupied.has(disciple.id))
-      .map(toWarEligible);
-    const rosterById = new Map(playerRoster.map((disciple) => [disciple.id, disciple]));
-    const party: WarEligibleDisciple[] = [];
-    for (const id of (state.warParty ?? []).slice(0, SECT_WAR_FIGHTERS)) {
-      const disciple = rosterById.get(id);
-      if (disciple && isWarEligible(disciple) && !party.some((entry) => entry.id === disciple.id)) {
-        party.push(disciple);
-      }
-    }
-    if (party.length < SECT_WAR_FIGHTERS) {
-      const autoFill = selectSectWarFighters(playerRoster).filter(
-        (disciple) => !party.some((entry) => entry.id === disciple.id),
-      );
-      party.push(...autoFill.slice(0, SECT_WAR_FIGHTERS - party.length));
-    }
+    // 全军出动：全部内门弟子（含岗位/长老占用者，除伤员）出战，同序配对打满全部对位。
+    const playerRoster = state.disciples.map(toWarEligible);
 
     const warResult = runSectWar({
-      playerFighters: party,
+      playerFighters: playerRoster,
       rivalFighters: rival.disciples.map(toWarEligible),
       seed: state.seed,
       playerStones: state.spiritStones,
@@ -586,7 +626,54 @@ export function settleMonthly(
     rival.prestige = applyPrestigeDelta(rival.prestige, record.rivalPrestigeDelta);
     rival.morale = Math.min(100, Math.max(0, rival.morale + record.rivalMoraleDelta));
 
-    // 参战者按战败伤势规则落账（各场战报给出败方侧别与掷骰结果）。
+    // 阵亡落账：战败方 3% 掷骰命中者当场除名（不入伤势、不入坐化补员递补；玩家侧一并清长老/工坊主持）。
+    const playerWarDeadIds = new Set<string>();
+    for (const pair of warResult.pairOutcomes) {
+      const death = pair.death;
+      if (!death) continue;
+      if (death.side === "player") {
+        const dead = state.disciples.find((disciple) => disciple.id === death.discipleId);
+        if (!dead) continue;
+        playerWarDeadIds.add(dead.id);
+        state.disciples = state.disciples.filter((disciple) => disciple.id !== dead.id);
+        appendChronicle(state, {
+          turn,
+          kind: "warning",
+          text: `${dead.name} 会战力战不敌，当场陨落！`,
+        });
+      } else {
+        const wasLeader = death.discipleId === rival.leaderId;
+        rival.disciples = rival.disciples.filter((disciple) => disciple.id !== death.discipleId);
+        appendChronicle(state, {
+          turn,
+          kind: "normal",
+          text: `情报：${rival.name} ${death.discipleName} 阵亡。`,
+        });
+        if (wasLeader) {
+          const successor = rival.disciples[0];
+          rival.leaderId = successor?.id ?? "";
+          if (successor) {
+            appendChronicle(state, {
+              turn,
+              kind: "normal",
+              text: `情报：${rival.name} 掌门陨落，${successor.name} 继任掌门。`,
+            });
+          }
+        }
+      }
+    }
+    if (playerWarDeadIds.size > 0) {
+      cleanupDeceasedElders(state);
+      if (state.jobs) {
+        for (const kind of CRAFT_JOB_KINDS) {
+          state.jobs[kind].workers = state.jobs[kind].workers.filter(
+            (workerId) => !playerWarDeadIds.has(workerId),
+          );
+        }
+      }
+    }
+
+    // 参战者按战败伤势规则落账（各场战报给出败方侧别与掷骰结果；阵亡者已除名，自动跳过）。
     const playerById = new Map(state.disciples.map((disciple) => [disciple.id, disciple]));
     const rivalById = new Map(rival.disciples.map((disciple) => [disciple.id, disciple]));
     for (const pair of warResult.pairOutcomes) {
@@ -600,6 +687,13 @@ export function settleMonthly(
           kind: pair.loser.kind === "heavy" ? "severe" : "light",
           untilTurn: turn + pair.loser.months,
         };
+        if (pair.loser.side === "player") {
+          appendChronicle(state, {
+            turn,
+            kind: "warning",
+            text: `${target.name} 会战负伤（${pair.loser.kind === "heavy" ? "重伤" : "轻伤"}，禁战 ${pair.loser.months} 月）。`,
+          });
+        }
       }
     }
 
@@ -620,15 +714,14 @@ export function settleMonthly(
       });
     }
 
-    // 战争状态收尾：进入 12 个月冷却（自宣战月起算），出战名单清空待下战重定。
+    // 战争状态收尾：进入 12 个月冷却（自宣战月起算）。
     state.warWithRival = false;
     state.warCooldownEndsTurn = (state.warDeclaredTurn ?? turn) + WAR_COOLDOWN_MONTHS;
     state.warDeclaredTurn = undefined;
-    state.warParty = undefined;
     warRecord = record;
   }
 
-  // ⑦ 声望/士气落地与胜负判定：声望/士气已随历练与会战落账；此处判吞并/被吞并/凋敝终局。
+  // ⑦ 声望/士气落地与胜负判定：声望/士气已随历练与会战落账；此处判吞并/元婴/被吞并/凋敝终局。
   if (!state.ending) {
     const rival = state.rival;
     if (
@@ -644,6 +737,14 @@ export function settleMonthly(
         "annexation",
         turn,
         `${state.sectName} 压服${rival.name}：对方声望扫地、山门俯首，仙途霸业自此功成。`,
+      );
+    } else if (nascentVictoryTriggered(state.disciples.map((disciple) => disciple.realmLevel))) {
+      const nascent = state.disciples.find((disciple) => disciple.realmLevel >= TOP_REALM_LEVEL);
+      setOutcomeEnding(
+        state,
+        "nascent_soul",
+        turn,
+        `${nascent?.name ?? "门下弟子"} 修成元婴：宗门出了元婴老祖，仙途问鼎就此功成。`,
       );
     } else if (
       rival &&
@@ -820,6 +921,13 @@ export type AnnexedInput = { myRank: number; rivalRank: number; myPrestige: numb
 /** 被吞并失局：我方声望 ≤0 且对方宗门等级更高。 */
 export function annexedTriggered(input: AnnexedInput): boolean {
   return input.myPrestige <= 0 && input.rivalRank > input.myRank;
+}
+
+// ─── 元婴胜利判定（设计 §胜负与结局评价：门下出元婴弟子即问鼎）──────────
+
+/** 元婴胜利：门下已有弟子修至元婴期（元婴前期即本简化版境界顶点）。 */
+export function nascentVictoryTriggered(realmLevels: readonly number[]): boolean {
+  return realmLevels.some((realmLevel) => realmLevel >= TOP_REALM_LEVEL);
 }
 
 // ─── 仙途评级（甲/乙/丙/丁；五维输入 → 综合评分，阈值写死常量）─────────

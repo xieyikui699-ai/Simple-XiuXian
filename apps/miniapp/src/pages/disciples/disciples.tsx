@@ -1,6 +1,7 @@
 import {
   ATTRIBUTE_KEYS,
   RECRUIT_COST,
+  RECRUIT_REFRESH_TURNS,
   ROOT_ELEMENT_DISPLAY_NAMES,
   ROOT_TYPE_DISPLAY_NAMES,
   listRecruitCandidates,
@@ -34,6 +35,8 @@ export default function DisciplesPage() {
   );
   const innerFull = inner.length >= limits.innerLimit;
   const candidates = showRecruit ? listRecruitCandidates(state) : [];
+  const monthsUntilRefresh =
+    RECRUIT_REFRESH_TURNS - ((state.currentTurn - 1) % RECRUIT_REFRESH_TURNS);
 
   const rootLabel = (disciple: (typeof state.disciples)[number]): string =>
     `${ROOT_TYPE_DISPLAY_NAMES[disciple.rootType]}（${disciple.rootElements
@@ -80,7 +83,7 @@ export default function DisciplesPage() {
           {innerFull && <Text className="muted">内门席位已满，无法招募。</Text>}
           {showRecruit && (
             <View className="recruit-panel">
-              <Text className="muted">候选 3 选 1，入门后直接录入内门。</Text>
+              <Text className="muted">{monthsUntilRefresh} 个月后刷新</Text>
               {candidates.map((candidate) => (
                 <View key={candidate.candidateId} className="candidate-row">
                   <View

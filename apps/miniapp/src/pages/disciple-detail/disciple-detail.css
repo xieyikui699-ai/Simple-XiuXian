@@ -19,6 +19,45 @@
   min-width: 0;
 }
 
+/* 自动服用丹药：档案卡姓名行下方两个可勾选选项（勾选=月结按条件自动从仓库服用）。 */
+.auto-pill-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  margin-bottom: 12rpx;
+}
+
+.auto-pill-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.auto-pill-label {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.auto-pill-chip {
+  padding: 2rpx 18rpx;
+  border: 2rpx solid var(--line);
+  border-radius: 999rpx;
+  background: var(--card-2);
+  font-size: 22rpx;
+  line-height: 38rpx;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.auto-pill-chip-on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
 /* 候选预览徽标：未入门弟子详情页头部标记。 */
 .candidate-badge {
   flex-shrink: 0;
@@ -37,6 +76,17 @@
   gap: 16rpx;
   padding: 12rpx 0;
   border-bottom: 2rpx solid var(--line);
+}
+
+/* 聚灵丹生效徽标：真元行中间标注 buff 效果（attr-row 三段式 space-between 居中）。 */
+.pill-badge {
+  flex-shrink: 0;
+  padding: 2rpx 14rpx;
+  border-radius: 999rpx;
+  background: var(--accent);
+  color: #fff;
+  font-size: 20rpx;
+  line-height: 34rpx;
 }
 
 .attr-row:last-child {
@@ -65,15 +115,15 @@
   font-weight: 700;
 }
 
-/* 战斗属性：六项两排放完（每排 3 个）。 */
+/* 战斗属性：六项排成一排（与五维一致）。 */
 .combat-grid {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .combat-cell {
-  width: 33.33%;
+  width: 16.66%;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -84,9 +134,10 @@
 
 .talent-row {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: baseline;
   padding: 12rpx 0;
-  gap: 4rpx;
+  gap: 16rpx;
 }
 
 .talent-name {
@@ -158,4 +209,12 @@
   color: var(--ink-2);
   font-size: 26rpx;
   line-height: 40rpx;
+}
+
+/* 效果面板内"从仓库/藏经阁选用"动作：通栏小按钮。 */
+.effect-panel .btn-mini {
+  align-self: stretch;
+  height: 68rpx;
+  line-height: 68rpx;
+  border-radius: 12rpx;
 }

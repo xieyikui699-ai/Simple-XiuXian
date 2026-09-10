@@ -305,7 +305,7 @@ export const TREASURES: readonly Treasure[] = [
     name: "太虚塔",
     tier: 4,
     effect: {
-      attributeFlat: { strength: 3, soulPower: 3, agility: 3, physique: 3, comprehension: 3 },
+      attributeFlat: { strength: 10, soulPower: 10, agility: 10, physique: 10, comprehension: 10 },
     },
   },
 ] as const;

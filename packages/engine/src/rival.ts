@@ -2,7 +2,7 @@
 // 生成与月度运行时（E04-F01）+ 宣战判定与相遇接线（E04-F02）。
 // 纯函数、确定性：弟子用与玩家同一 generateDisciple 生成器（seed 命名空间 ":rival"），
 // 掷骰一律 sha256（hash.deterministicRoll），禁 Math.random；同 seed 双跑恒等。
-// NPC 不服丹、不研读功法法术（装备即战力）；难度 ×0.8/1.0/1.2 作用于月度真元收益。
+// NPC 不服丹、不研读功法法术（装备即战力）；难度 ×0.8/1.0/1.2 作用于月度真元收益与招募频率。
 import { treasuresOfTier } from "./catalog.js";
 import { generateDisciple } from "./generation.js";
 import { deterministicRoll } from "./hash.js";
@@ -12,7 +12,7 @@ import {
   nextRealmStage,
   realmStageForLevel,
 } from "./realms.js";
-import { upgradeRequirementFor } from "./sect.js";
+import { RECRUIT_COST, sectLimitsFor, upgradeRequirementFor } from "./sect.js";
 import { currentSuccessRate, monthlyZhenyuanGain } from "./settlement.js";
 import type { Disciple, GameState } from "./state.js";
 
@@ -21,6 +21,15 @@ import type { Disciple, GameState } from "./state.js";
 export const RIVAL_INITIAL_INNER_DISCIPLES = 3;
 /** NPC 亦按内门俸禄口径支付掌门俸禄（经济简算：无供奉收入、仅支出俸禄）。 */
 export const RIVAL_LEADER_EXTRA_INNER = 1;
+/**
+ * 经济简算（对手无外门分工面板）：月收入 = 外门上限 × 单价（外门恒满员即全员在矿口径）。
+ * 单价 2（2026-09-10 九）：原 1（与玩家挖矿同价，outer-jobs.OUTER_MINING_STONES_PER_MONTH = 1）时
+ * 1 级收入 100 与内门俸禄 10×10 相抵走平，升阶（5,000）永不可攒（「对手经济天花板」待办）；
+ * 上调后 1 级月入 200，与配灵矿长老的玩家常态收入相当。
+ */
+export const RIVAL_INCOME_PER_OUTER_PER_MONTH = 2;
+/** NPC 月度招募概率（难度 1.0 基准，实际 = 基准 × 难度；内门未满且灵石足额才掷骰）。 */
+export const RIVAL_RECRUIT_CHANCE_PCT = 30;
 
 /** 难度三档：发展速度倍率（作用于 NPC 月度真元收益与招募频率）。 */
 export const RIVAL_DIFFICULTY_MULTIPLIERS = [0.8, 1, 1.2] as const;
@@ -132,16 +141,19 @@ function equipRivalInner(rival: RivalSect): void {
 // ─── 月度运行时（与玩家月结同帧推进；纯函数返回新 RivalSect）────────────
 
 /**
- * NPC 月度推进：① 经济简算（支出内门俸禄，无供奉收入）→ ② 内门真元/突破（同玩家公式 ×难度）
- * → ③ 升阶条件满足自动升阶（并按新等级重配装备；外门总数随等级上限扩容）。
+ * NPC 月度推进：① 经济简算（外门挖矿收入 − 内门俸禄）→ ② 内门真元/突破（同玩家公式 ×难度）
+ * → ③ 升阶条件满足自动升阶（并按新等级重配装备）→ ④ 招募补员：内门未满且灵石足额时按概率（×难度）
+ * 招 1 名新弟子入内门（与玩家招募同价 RECRUIT_COST；新弟子按当前等级配装备）。
  * NPC 不服丹、不研读、不做衰老坐化（设计 §月度运行时 未列；寿元字段仅作数据扩展位）。
  */
 export function advanceRivalSectMonthly(rivalInput: Readonly<RivalSect>, turn: number): RivalSect {
   const rival = structuredClone(rivalInput) as RivalSect;
 
-  // ① 经济简算：无供奉收入，仅支出内门俸禄 = 内门人数（含掌门）× 10（灵石钳 0，保证掠夺额度非负）。
+  // ① 经济简算：挖矿收入（外门上限 × 单价，外门恒满员）− 内门俸禄 = 内门人数（含掌门）× 10
+  //（灵石钳 0，保证掠夺额度非负）。
+  const income = sectLimitsFor(rival.sectRank).outerLimit * RIVAL_INCOME_PER_OUTER_PER_MONTH;
   const innerCount = rival.disciples.length;
-  rival.spiritStones = Math.max(0, rival.spiritStones - innerCount * 10);
+  rival.spiritStones = Math.max(0, rival.spiritStones + income - innerCount * 10);
 
   // ② 内门真元与突破（与玩家同一公式；难度倍率作用于月度真元收益）。
   for (const disciple of rival.disciples) {
@@ -191,7 +203,26 @@ export function advanceRivalSectMonthly(rivalInput: Readonly<RivalSect>, turn: n
     }
   }
 
-  // 外门恒按宗门等级上限满员，无流动/招募步（升阶即扩容，见 sectLimitsFor 派生口径）。
+  // ④ 招募补员：内门未满且灵石足额时掷骰（seed 契约 `${seed}:rival-recruit:${turn}`），
+  // 频率 ×难度；招 1 名即扣与玩家同价的招募费。新弟子沿用对手命名空间顺号生成（不与现名册重名），
+  // 练气初期起步、按当前宗门等级配装备；升阶先行，故按升阶后的内门上限与结余灵石判定。
+  if (
+    rival.disciples.length < sectLimitsFor(rival.sectRank).innerLimit &&
+    rival.spiritStones >= RECRUIT_COST &&
+    deterministicRoll(`${rival.seed}:rival-recruit:${turn}`) <
+      RIVAL_RECRUIT_CHANCE_PCT * rival.difficulty
+  ) {
+    rival.spiritStones -= RECRUIT_COST;
+    rival.discipleSeq += 1;
+    const disciple = generateDisciple({
+      gameSeed: `${rival.seed}:rival`,
+      discipleId: `r-${rival.discipleSeq}`,
+      ordinal: rival.discipleSeq,
+      usedNames: rival.disciples.map((entry) => entry.name),
+    });
+    rival.disciples.push(disciple);
+    equipRivalInner(rival);
+  }
 
   return rival;
 }

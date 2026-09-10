@@ -11,12 +11,10 @@ import {
   getTreasureById,
   treasureEffectDescription,
 } from "./catalog.js";
-import { combatReadyDisciples } from "./expedition.js";
 import { generateDisciple } from "./generation.js";
 import { ADULT_AGE } from "./production.js";
 import { realmStageForLevel } from "./realms.js";
 import { canPlayerDeclareWar, createRivalSect, declareWar } from "./rival.js";
-import { SECT_WAR_FIGHTERS } from "./sect-war.js";
 import {
   INITIAL_INNER_DISCIPLES,
   INITIAL_MORALE,
@@ -24,6 +22,7 @@ import {
   INITIAL_SPIRIT_STONES,
   RECRUIT_CANDIDATE_COUNT,
   RECRUIT_COST,
+  RECRUIT_REFRESH_TURNS,
   sectLimitsFor,
   sectUpgradeFailureReason,
   upgradeRequirementFor,
@@ -102,12 +101,20 @@ export function listRecruitCandidates(state: Readonly<GameState>): RecruitmentCa
   const usedNames = state.disciples.map((disciple) => disciple.name);
   const candidates: RecruitmentCandidate[] = [];
   const seen = new Set<string>();
+  // 候选按刷新窗口派生（每 RECRUIT_REFRESH_TURNS 个月整批换血）：窗口内档案只由窗口序号 + 槽位
+  // 决定，招募不重掷其余候选；已入门者按 fromCandidate 从本批剔除（招一个少一个）。
+  const batchIndex = Math.floor((state.currentTurn - 1) / RECRUIT_REFRESH_TURNS);
+  const claimed = new Set(
+    state.disciples.flatMap((disciple) => (disciple.fromCandidate ? [disciple.fromCandidate] : [])),
+  );
   for (let i = 0; i < RECRUIT_CANDIDATE_COUNT; i++) {
-    const candidateId = `cand-${state.currentTurn}-${i}`;
+    const candidateId = `cand-${batchIndex}-${i}`;
+    if (claimed.has(candidateId)) continue;
     const candidate = generateDisciple({
       gameSeed: state.seed,
       discipleId: `preview:${candidateId}`,
-      ordinal: state.discipleSeq + 1 + i,
+      nameSeed: `preview:${candidateId}`,
+      ordinal: i + 1,
       usedNames: [...usedNames, ...seen],
     });
     seen.add(candidate.name);
@@ -137,8 +144,13 @@ export function recruitDisciple(
   const state = structuredClone(stateInput) as GameState;
   state.spiritStones -= RECRUIT_COST;
   state.discipleSeq += 1;
-  // 所选候选原样录入（名册预览即录入本人，3 选 1 的选择生效）；弟子编号仍按 d-1 顺号分配。
-  const disciple: Disciple = { ...chosen.disciple, id: `d-${state.discipleSeq}` };
+  // 所选候选原样录入（名册预览即录入本人，3 选 1 的选择生效）；弟子编号仍按 d-1 顺号分配，
+  // fromCandidate 记录来源候选，本刷新窗口内不再重复出现（招一个少一个）。
+  const disciple: Disciple = {
+    ...chosen.disciple,
+    id: `d-${state.discipleSeq}`,
+    fromCandidate: chosen.candidateId,
+  };
   state.disciples.push(disciple);
   return { state, disciple };
 }
@@ -176,7 +188,7 @@ export type LearnArtOutcome = {
   disciple: Disciple;
 };
 
-/** 研读功法/法术：藏经阁拥有方可研读；功法书研读后消耗（自藏经阁消失，一书仅一人可研），法术不耗书；功法限 1 门、法术限 2 门。 */
+/** 研读功法/法术：藏经阁拥有方可研读；功法/法术书研读后均消耗（自藏经阁消失，一书仅一人可研）；功法限 1 门、法术限 2 门。 */
 export function learnArt(
   stateInput: Readonly<GameState>,
   discipleId: string,
@@ -220,10 +232,13 @@ export function learnArt(
     });
   } else {
     target.spellIds = [...(target.spellIds ?? []), artId].slice(0, MAX_SPELLS_PER_DISCIPLE);
+    // 研读消耗书册：与功法同口径，该书自藏经阁消失（历练奇遇可再得同书）。
+    state.library ??= emptyLibrary();
+    state.library.spellIds = state.library.spellIds.filter((id) => id !== artId);
     appendChronicle(state, {
       turn: state.currentTurn,
       kind: "normal",
-      text: `${target.name} 修习法术《${plan.name}》，指下灵光初成。`,
+      text: `${target.name} 修习法术《${plan.name}》，指下灵光初成，书册已耗。`,
     });
   }
   return { state, disciple: target };
@@ -325,6 +340,28 @@ export function usePill(
   return { state, disciple: target };
 }
 
+export type SetAutoPillOutcome = {
+  state: GameState;
+  disciple: Disciple;
+};
+
+/** 自动服用丹药开关：按弟子启用/停用延寿丹、聚灵丹自动服（月结开头按条件自动从仓库服用，见 settlement）。 */
+export function setAutoPill(
+  stateInput: Readonly<GameState>,
+  discipleId: string,
+  pillId: string,
+  enabled: boolean,
+): SetAutoPillOutcome {
+  if (stateInput.ending) throw new Error("game_already_ended");
+  if (pillId !== "pill-yanshou" && pillId !== "pill-juling") throw new Error("pill_not_found");
+  const state = structuredClone(stateInput) as GameState;
+  const disciple = state.disciples.find((entry) => entry.id === discipleId);
+  if (!disciple) throw new Error("disciple_not_found");
+  if (pillId === "pill-yanshou") disciple.autoPillYanshou = enabled || undefined;
+  else disciple.autoPillJuling = enabled || undefined;
+  return { state, disciple };
+}
+
 export type ElderKind = "resource" | "war" | "mine";
 
 const ELDER_DISPLAY: Record<ElderKind, { name: string; effect: string }> = {
@@ -411,42 +448,7 @@ export function discipleCultivationView(state: Readonly<GameState>, disciple: Di
   };
 }
 
-// ─── M3 两宗对抗命令：会战出战名单 / 宣战 ────────────────────────────────
-
-export type SetWarPartyOutcome = {
-  state: GameState;
-  discipleIds: string[];
-};
-
-/** 指定会战出战弟子（至多 3 名，须为可出战内门；清空传空数组即恢复自动选将）。 */
-export function setWarParty(
-  stateInput: Readonly<GameState>,
-  discipleIds: readonly string[],
-): SetWarPartyOutcome {
-  if (stateInput.ending) throw new Error("game_already_ended");
-  const unique = [...new Set(discipleIds)];
-  if (unique.length > SECT_WAR_FIGHTERS) throw new Error("war_party_too_large");
-  const readyIds = new Set(
-    combatReadyDisciples(stateInput, stateInput.currentTurn).map((d) => d.id),
-  );
-  for (const id of unique) {
-    if (!readyIds.has(id)) throw new Error("war_party_disciple_unavailable");
-  }
-  const state = structuredClone(stateInput) as GameState;
-  state.warParty = unique;
-  const names = unique
-    .map((id) => state.disciples.find((disciple) => disciple.id === id)?.name)
-    .filter((name): name is string => name !== undefined);
-  state.chronicle.unshift({
-    turn: state.currentTurn,
-    kind: "normal",
-    text:
-      names.length > 0
-        ? `会战出战名单已定：${names.join("、")}。`
-        : "会战出战名单已清空，届时自动选派最强弟子。",
-  });
-  return { state, discipleIds: unique };
-}
+// ─── M3 两宗对抗命令：宣战（会战全军出动，无须指定出战名单）─────────────
 
 export type DeclareWarOutcome = {
   state: GameState;

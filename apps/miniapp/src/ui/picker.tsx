@@ -18,6 +18,64 @@ export type DisciplePickerProps = {
   onCancel: () => void;
 };
 
+export type OptionPickerItem = {
+  key: string;
+  title: string;
+  /** 副文案（效果说明等）。 */
+  sub?: string;
+  /** 返回文案表示该行被禁用及原因；空串/缺省表示可点选。 */
+  disabledReason?: string;
+};
+
+export type OptionPickerProps = {
+  title: string;
+  hint?: string;
+  /** 列表为空时的占位文案。 */
+  emptyText?: string;
+  items: readonly OptionPickerItem[];
+  onPick: (key: string) => void;
+  /** 未选择即关闭（点遮罩 / 取消按钮）。 */
+  onCancel: () => void;
+};
+
+/** 通用选项弹层：与 DisciplePicker 同款样式，供"从仓库/藏经阁选用"等场景复用。 */
+export function OptionPicker({
+  title,
+  hint,
+  emptyText,
+  items,
+  onPick,
+  onCancel,
+}: OptionPickerProps) {
+  return (
+    <View className="picker-mask" onClick={onCancel}>
+      <View className="picker" onClick={(event) => event.stopPropagation()}>
+        <Text className="picker-title">{title}</Text>
+        {hint !== undefined && <Text className="muted">{hint}</Text>}
+        {items.length === 0 && <Text className="muted">{emptyText ?? "没有可选项。"}</Text>}
+        {items.map((item) => {
+          const reason = item.disabledReason ?? "";
+          return (
+            <View
+              key={item.key}
+              className={`picker-row${reason ? " picker-row-disabled" : ""}`}
+              onClick={() => {
+                if (!reason) onPick(item.key);
+              }}
+            >
+              <Text>{item.title}</Text>
+              <Text className="muted">{reason || item.sub}</Text>
+            </View>
+          );
+        })}
+        <Button className="picker-cancel" onClick={onCancel}>
+          取消
+        </Button>
+      </View>
+    </View>
+  );
+}
+
 export function DisciplePicker({
   title,
   hint,

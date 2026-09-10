@@ -12,7 +12,9 @@ export type SectRank = keyof typeof SECT_RANK_RULES;
 
 export const INNER_SALARY_PER_DISCIPLE = 10;
 export const RECRUIT_COST = 300;
-export const RECRUIT_CANDIDATE_COUNT = 3;
+export const RECRUIT_CANDIDATE_COUNT = 5;
+/** 招募候选刷新窗口（月，10 年 = 120 回合）：窗口内招一个少一个，窗口结束整批换血。 */
+export const RECRUIT_REFRESH_TURNS = 120;
 export const INITIAL_SPIRIT_STONES = 2000;
 export const INITIAL_MORALE = 70;
 export const INITIAL_PRESTIGE = 50;

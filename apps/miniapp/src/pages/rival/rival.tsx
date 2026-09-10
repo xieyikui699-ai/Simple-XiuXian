@@ -79,8 +79,13 @@ export default function RivalPage() {
             <Text className="muted">{cooldownText}</Text>
           )}
           <Button className="btn-primary" disabled={!canDeclare} onClick={() => store.wageWar()}>
-            {canDeclare ? "宣战（来月会战）" : "暂不可宣战"}
+            {canDeclare ? "宣战（来月全军会战）" : "暂不可宣战"}
           </Button>
+          {canDeclare && (
+            <Text className="muted">
+              宣战即全军出动：双方全员按战力同序配对厮杀，败方每阵 3% 当场陨落；胜方掠灵石 10%（上限 5,000）。
+            </Text>
+          )}
           {errorMessage !== null && (
             <Text className="error-line" onClick={() => store.clearError()}>
               {errorMessage}（点击关闭）
@@ -115,7 +120,9 @@ export default function RivalPage() {
         <View className="card">
           <View className="card-title">会战记录（最新在前，至多留存 20 场）</View>
           {(state.sectWars ?? []).length === 0 && (
-            <Text className="muted">尚无会战。宣战后来月开战，胜方掠灵石 10%（上限 5,000）。</Text>
+            <Text className="muted">
+              尚无会战。宣战后来月全军开战，败方每阵 3% 阵亡；胜方掠灵石 10%（上限 5,000）。
+            </Text>
           )}
           {(state.sectWars ?? []).map((record, index) => (
             <View key={`${record.turn}-${index}`} className="war-record">
@@ -127,9 +134,17 @@ export default function RivalPage() {
               <Text className="muted">
                 声望 {record.prestigeDelta > 0 ? "+" : ""}
                 {record.prestigeDelta} · 士气 {record.moraleDelta > 0 ? "+" : ""}
-                {record.moraleDelta} · 三阵对阵：
+                {record.moraleDelta} · 全阵对阵：
                 {record.pairOutcomes
-                  .map((pair) => `${pair.playerFighterName}vs${pair.rivalFighterName}`)
+                  .map((pair) => {
+                    const fallen =
+                      pair.death?.side === "player"
+                        ? pair.playerFighterName
+                        : pair.death?.side === "rival"
+                          ? pair.rivalFighterName
+                          : undefined;
+                    return `${pair.playerFighterName}vs${pair.rivalFighterName}${fallen ? `（${fallen}陨落）` : ""}`;
+                  })
                   .join("、")}
               </Text>
             </View>

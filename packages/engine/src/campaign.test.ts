@@ -3,7 +3,7 @@
 // 三结局与评级、大境界突破声望 +3、终局锁语义。全链路均为纯函数确定性推进。
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createGame, setWarParty } from "./engine.js";
+import { createGame } from "./engine.js";
 import { createRivalSect, declareWar, prestigeDeltaForMajorBreakthrough } from "./rival.js";
 import { rateEnding, settleMonthly } from "./settlement.js";
 import type { GameState } from "./state.js";
@@ -64,6 +64,35 @@ describe("E04 两宗对抗全链路（campaign）", () => {
     }
   });
 
+  it("会战负伤落纪事：我方战败负伤弟子逐条入纪事（重伤/轻伤、禁战月数），对方负伤不入我方纪事", () => {
+    const state = runCampaign("campaign-golden", 60);
+    const playerInjuries = (state.sectWars ?? []).flatMap((record) =>
+      record.pairOutcomes
+        .filter((pair) => pair.loser?.side === "player")
+        .map((pair) => ({
+          turn: record.turn,
+          name: pair.playerFighterName,
+          kind: pair.loser!.kind,
+          months: pair.loser!.months,
+        })),
+    );
+    assert.ok(playerInjuries.length >= 1, "golden 剧本 60 月内我方会战负伤至少 1 起");
+    for (const injury of playerInjuries) {
+      const text = `${injury.name} 会战负伤（${injury.kind === "heavy" ? "重伤" : "轻伤"}，禁战 ${injury.months} 月）。`;
+      assert.ok(
+        state.chronicle.some(
+          (entry) => entry.turn === injury.turn && entry.kind === "warning" && entry.text === text,
+        ),
+        `缺纪事：${text}`,
+      );
+    }
+    // 纪事中「会战负伤」仅我方负伤落账，对方负伤不入我方纪事。
+    assert.equal(
+      state.chronicle.filter((entry) => entry.text.includes("会战负伤")).length,
+      playerInjuries.length,
+    );
+  });
+
   it("宣战次月触发会战：当月不开战、次月第 6 步结算并进入 12 月冷却；冷却期内拒绝宣战", () => {
     let state = createGame({ seed: "war-flow", sectName: "青云门", rivalName: "玄阴宗" });
     state = declareWar(state);
@@ -76,19 +105,6 @@ describe("E04 两宗对抗全链路（campaign）", () => {
     assert.throws(() => declareWar(first.state), /war_cooldown_active/);
   });
 
-  it("setWarParty：指定出战名单（≤3 可出战内门），超编/伤员/外门被拒", () => {
-    const state = createGame({ seed: "party-seed", sectName: "青云门", rivalName: "玄阴宗" });
-    const out = setWarParty(state, ["d-1", "d-2"]);
-    assert.deepEqual(out.state.warParty, ["d-1", "d-2"]);
-    assert.throws(() => setWarParty(state, ["d-1", "d-2", "d-3", "d-4"]), /war_party_too_large/);
-    assert.throws(() => setWarParty(state, ["d-5"]), /war_party_disciple_unavailable/); // 外门
-    const injured = structuredClone(state);
-    const target = injured.disciples.find((disciple) => disciple.id === "d-3");
-    assert.ok(target);
-    target.injury = { kind: "light", untilTurn: injured.currentTurn };
-    assert.throws(() => setWarParty(injured, ["d-3"]), /war_party_disciple_unavailable/);
-  });
-
   it("大境界突破声望 +3（进入 4/7/10 级），其余等级为 0", () => {
     assert.equal(prestigeDeltaForMajorBreakthrough(4), 3);
     assert.equal(prestigeDeltaForMajorBreakthrough(7), 3);
@@ -96,7 +112,7 @@ describe("E04 两宗对抗全链路（campaign）", () => {
     assert.equal(prestigeDeltaForMajorBreakthrough(5), 0);
   });
 
-  it("三结局判定与评级：吞并/被吞并对称、凋敝连续 6 月、评级阈值确定", () => {
+  it("四结局判定与评级：吞并/被吞并对称、元婴、凋敝连续 6 月、评级阈值确定", () => {
     // 吞并：对方声望 0 且我方等级更高 → 次月月结触发。
     const state = createGame({ seed: "annex-seed", sectName: "青云门", rivalName: "玄阴宗" });
     const rival = state.rival;

@@ -184,7 +184,7 @@ export default function WarehousePage() {
     return (
       <DisciplePicker
         title={`研读《${getTechniqueById(usage.artId)?.name ?? spell?.name ?? usage.artId}》`}
-        hint="功法限修 1 门（研读后书册消耗）、法术限修 2 门（不耗书）。"
+        hint="功法限修 1 门、法术限修 2 门，研读后书册均消耗。"
         disciples={pickerDisciples}
         disabledReason={(disciple) => {
           if (getSpellById(usage.artId)) {
@@ -287,10 +287,6 @@ export default function WarehousePage() {
           <View className="card-title">
             藏经阁（功法 {library.techniqueIds.length} / 法术 {library.spellIds.length}）
           </View>
-          <Text className="muted">
-            书册来源：每月历练奇遇偶得，自动送入藏经阁；功法研读后书册消耗（一书仅一名弟子可研），
-            法术不耗书、可反复研读；法术亦可由弟子突破顿悟直接习得。
-          </Text>
           {library.techniqueIds.length === 0 && library.spellIds.length === 0 && (
             <Text className="muted">藏经阁暂无藏书，先等历练奇遇入阁。</Text>
           )}

@@ -13,13 +13,16 @@ export type GenerateDiscipleInput = {
   discipleId: string;
   /** 取名序号：同局内单调递增，保证避重。 */
   ordinal: number;
+  /** 取名种子：默认同 gameSeed（全局序号流）；候选预览传入 discipleId 专属种子，
+   *  避免相邻批次因序号错位而复用姓名（同名换人）。 */
+  nameSeed?: string;
   usedNames?: Iterable<string>;
   age?: number;
 };
 
 export function generateDisciple(input: GenerateDiscipleInput): Disciple {
   const { name, gender } = generateDiscipleProfile({
-    seed: input.gameSeed,
+    seed: input.nameSeed ?? input.gameSeed,
     ordinal: input.ordinal,
     usedNames: input.usedNames,
   });

@@ -345,7 +345,7 @@ describe("装备系统（法宝目录 × 10，随机炼制/掉落）", () => {
           "太虚塔",
           4,
           {
-            attributeFlat: { strength: 3, soulPower: 3, agility: 3, physique: 3, comprehension: 3 },
+            attributeFlat: { strength: 10, soulPower: 10, agility: 10, physique: 10, comprehension: 10 },
           },
         ],
       ],
@@ -362,7 +362,7 @@ describe("装备系统（法宝目录 × 10，随机炼制/掉落）", () => {
       "攻击 +35%",
       "生命 +500",
       "法威 +32",
-      "五维各 +3",
+      "五维各 +10",
     ]);
     assert.equal(new Set(descriptions).size, descriptions.length);
     assert.deepEqual([...GEAR_SLOT_KEYS], ["talisman"]);
@@ -412,7 +412,7 @@ describe("装备系统（法宝目录 × 10，随机炼制/掉落）", () => {
     });
     assert.deepEqual(gearCombatInput({ talisman: "gear-taixuta" }), {
       ...empty,
-      attributeFlat: { strength: 3, soulPower: 3, agility: 3, physique: 3, comprehension: 3 },
+      attributeFlat: { strength: 10, soulPower: 10, agility: 10, physique: 10, comprehension: 10 },
     });
   });
 });

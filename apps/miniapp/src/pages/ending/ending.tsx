@@ -8,6 +8,7 @@ import "./ending.css";
 
 const ENDING_KIND_LABELS: Record<string, string> = {
   annexation: "吞并胜利 · 独尊一方",
+  nascent_soul: "元婴大成 · 问鼎仙途",
   annexed: "被吞并 · 山门倾覆",
   bankrupt: "宗门凋敝 · 曲终人散",
 };
@@ -35,7 +36,7 @@ export default function EndingPage() {
           <View className="card">
             <View className="card-title">本局仍在进行</View>
             <Text className="muted">
-              压制对方声望且宗门等级更高可吞并对手；声望扫地则被吞并，内门凋敝则宗门败落。
+              吞并敌对宗门，或门下出元婴弟子，皆可问鼎仙途；声望扫地则被吞并，内门凋敝则宗门败落。
             </Text>
           </View>
         )}

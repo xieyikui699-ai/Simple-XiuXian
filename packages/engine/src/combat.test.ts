@@ -260,12 +260,12 @@ describe("属性派生唯一公式（combat-profile，玩家与 NPC 共用）", 
       makeDisciple({ equippedGear: { talisman: "gear-huangquanfan" } }),
     );
     assert.equal(banner.defense, Math.round(17 * 1.5));
-    // 太虚塔：五维各 +3 → 有效五维 53，攻击/法威按 53 重算（round(30+13.25)=43 → 44）。
+    // 太虚塔：五维各 +10 → 有效五维 60，攻击/法威按 60 重算。
     const pagoda = buildCombatProfile(makeDisciple({ equippedGear: { talisman: "gear-taixuta" } }));
-    assert.equal(pagoda.breakdown.attributes.effective.strength, 53);
-    assert.equal(pagoda.breakdown.attributes.effective.comprehension, 53);
-    assert.equal(pagoda.physicalAttack, Math.round(30 + (53 / 4) * 1));
-    assert.equal(pagoda.magicPower, Math.round(30 + (53 / 4) * 1));
+    assert.equal(pagoda.breakdown.attributes.effective.strength, 60);
+    assert.equal(pagoda.breakdown.attributes.effective.comprehension, 60);
+    assert.equal(pagoda.physicalAttack, Math.round(30 + (60 / 4) * 1));
+    assert.equal(pagoda.magicPower, Math.round(30 + (60 / 4) * 1));
   });
 });
 
@@ -401,6 +401,52 @@ describe("回合规则（battle）", () => {
     assert.ok(hitRate > 0.85 && hitRate < 0.95, `命中率 ${hitRate}`);
     const critRate = crits / hits;
     assert.ok(critRate > 0.18 && critRate < 0.28, `暴击率 ${critRate}`);
+  });
+
+  it("法术无法暴击：暴击率封顶 50% 时法术行动仍恒不暴击；普攻（物理）照常暴击", () => {
+    // 施法者：悟性 100 + critFlat 20 → 暴击率 10+25+20=55 封顶 50（最高档）。
+    const spell = {
+      id: "s-nocrit",
+      name: "不暴击火球",
+      element: "fire",
+      multiplier: 1.5,
+      cooldown: 0,
+    } as const;
+    const caster = profileFighter(
+      "施法者",
+      deriveCombatProfile({
+        realmLevel: 10,
+        attributes: { ...BASE_ATTRIBUTES, soulPower: 90, physique: 90, comprehension: 100 },
+        critFlat: 20,
+      }),
+      { spells: [spell], plan: [{ kind: "spell", spellId: "s-nocrit" }] },
+    );
+    assert.equal(caster.profile.critRate, 50);
+    // 铁塔：10 级体魄 100 → 生命 1550、防御 291；每回合普攻 32，足够多回合供统计。
+    const tank = () =>
+      profileFighter(
+        "铁塔",
+        deriveCombatProfile({ realmLevel: 10, attributes: { ...BASE_ATTRIBUTES, physique: 100 } }),
+      );
+    let spellHits = 0;
+    let basicHits = 0;
+    let basicCrits = 0;
+    for (let i = 1; i <= 30; i++) {
+      const report = runBattle(caster, tank(), `battle-spell-nocrit-${i}`);
+      for (const action of report.actions) {
+        if (action.kind === "spell" && action.spellId === "s-nocrit") {
+          assert.equal(action.crit, false, `第 ${action.round} 回合法术出现暴击`);
+          if (action.hit) spellHits += 1;
+        }
+        if (action.actor === "B" && action.kind === "basic" && action.hit) {
+          basicHits += 1;
+          if (action.crit) basicCrits += 1;
+        }
+      }
+    }
+    assert.ok(spellHits > 0, "法术应有命中样本");
+    assert.ok(basicHits > 0, "普攻应有命中样本");
+    assert.ok(basicCrits > 0, "普攻（物理）应照常暴击");
   });
 
   it("伤势：胜利方无伤，战败方按 40% 轻伤 / 20% 重伤 / 其余无伤掷骰", () => {

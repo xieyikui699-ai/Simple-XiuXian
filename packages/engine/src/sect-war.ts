@@ -7,13 +7,14 @@ import { injuryMonthsFor, runBattle } from "./battle.js";
 import { getSpellById } from "./catalog.js";
 import type { Spell } from "./catalog.js";
 import { buildCombatProfile } from "./combat-profile.js";
+import { deterministicRoll } from "./hash.js";
 import { realmStageForLevel } from "./realms.js";
 import type { Disciple } from "./state.js";
 
 // ─── 会战常量（设计 §两宗对抗·会战结果）─────────────────────────────────
 
-/** 双方各派 3 名可出战内门弟子（不足 3 人按实有数）。 */
-export const SECT_WAR_FIGHTERS = 3;
+/** 败方阵亡判定：每阵战败者 3% 概率当场陨落（阵亡者不入伤势，由月结除名）。 */
+export const WAR_DEATH_CHANCE_PCT = 3;
 /** 胜方掠夺败方灵石 10%（上限 5,000，向下取整）。 */
 export const WAR_PLUNDER_PCT = 0.1;
 export const WAR_PLUNDER_CAP = 5000;
@@ -24,7 +25,7 @@ export const WAR_MORALE_DELTA = 5;
 /** 会战参战弟子：内门弟子 + 当月剩余禁战月数（由伤势模型换算，0/缺省 = 可出战）。 */
 export type WarEligibleDisciple = Disciple & { injuryMonthsLeft?: number };
 
-/** 会战参战资格：无未愈伤势（injuryMonthsLeft > 0 = 仍在禁战期；名册全员内门，外门只是数字不参战；岗位/长老占用者由月结⑥在名册层面排除）。 */
+/** 会战参战资格：无未愈伤势（injuryMonthsLeft > 0 = 仍在禁战期；全军出动：名册全员含岗位/长老占用者皆出战，外门只是数字不参战）。 */
 export function isWarEligible(disciple: WarEligibleDisciple): boolean {
   return !(disciple.injuryMonthsLeft && disciple.injuryMonthsLeft > 0);
 }
@@ -39,22 +40,20 @@ function compareWarStrength(a: WarEligibleDisciple, b: WarEligibleDisciple): num
   return b.realmLevel - a.realmLevel || b.zhenyuan - a.zhenyuan || a.id.localeCompare(b.id);
 }
 
-/** 选将：可出战内门按战力降序取前 3（不足按实有数）。 */
-export function selectSectWarFighters(
-  roster: readonly WarEligibleDisciple[],
-): WarEligibleDisciple[] {
-  return roster.filter(isWarEligible).sort(compareWarStrength).slice(0, SECT_WAR_FIGHTERS);
+/** 出战名单：全军出动——可出战弟子全员按战力降序（同值真元高者优先，再同按 id 稳定排序）。 */
+function warRosterOrder(roster: readonly WarEligibleDisciple[]): WarEligibleDisciple[] {
+  return roster.filter(isWarEligible).sort(compareWarStrength);
 }
 
 export type SectWarPair = { player: WarEligibleDisciple; rival: WarEligibleDisciple };
 
-/** 同序配对：双方各按战力降序排列后逐位配对（人数不等时按较少一方配对）。 */
+/** 同序配对：双方全军按战力降序排列后逐位配对，打满全部对位（人数不等时按较少一方配对）。 */
 export function pairSectWarFighters(
   playerRoster: readonly WarEligibleDisciple[],
   rivalRoster: readonly WarEligibleDisciple[],
 ): SectWarPair[] {
-  const player = selectSectWarFighters(playerRoster);
-  const rival = selectSectWarFighters(rivalRoster);
+  const player = warRosterOrder(playerRoster);
+  const rival = warRosterOrder(rivalRoster);
   const count = Math.min(player.length, rival.length);
   const pairs: SectWarPair[] = [];
   for (let i = 0; i < count; i++) {
@@ -131,6 +130,8 @@ export type SectWarPairResult = PairOutcome & {
   battle: BattleReport;
   /** 战败方（draw 缺省）与其伤势（供月结落到对应弟子）。 */
   loser?: { side: "player" | "rival"; discipleId: string; kind: "light" | "heavy"; months: number };
+  /** 阵亡者：战败方 3% 掷骰命中（draw 缺省；阵亡者不再落伤势，由月结除名）。 */
+  death?: { side: "player" | "rival"; discipleId: string; discipleName: string };
 };
 
 export type RunSectWarInput = {
@@ -156,8 +157,9 @@ export type SectWarResult = SectWarVerdict & {
 };
 
 /**
- * 结算一场 3v3 会战：选将 → 同序配对逐场 1v1（我方为 A 方/攻方）→ 裁决 → 掠夺与声望士气口径。
- * 参战者伤势由各场战报 injuries 给出，由调用方（月结）落到对应弟子。
+ * 结算一场全军会战：全员按战力同序配对逐位 1v1（我方为 A 方/攻方，打满全部对位）→ 裁决 → 掠夺与声望士气口径。
+ * 每阵战败者再掷 3% 阵亡骰（seed 契约 `${seed}:sect-war-death:${turn}:${index}`）；
+ * 参战者伤势与阵亡由调用方（月结）落到对应弟子。
  */
 export function runSectWar(input: RunSectWarInput): SectWarResult {
   const turn = input.turn ?? 0;
@@ -191,6 +193,18 @@ export function runSectWar(input: RunSectWarInput): SectWarResult {
         months: injuryMonthsFor(battle.injuries.A),
       };
     }
+    let death: SectWarPairResult["death"];
+    if (battle.winner === "A" || battle.winner === "B") {
+      const fallen = battle.winner === "A" ? pair.rival : pair.player;
+      const deathRoll = deterministicRoll(`${input.seed}:sect-war-death:${turn}:${index}`);
+      if (deathRoll < WAR_DEATH_CHANCE_PCT) {
+        death = {
+          side: fallen === pair.player ? "player" : "rival",
+          discipleId: fallen.id,
+          discipleName: fallen.name,
+        };
+      }
+    }
     return {
       winner,
       playerDamage: totalDamage.A,
@@ -201,6 +215,7 @@ export function runSectWar(input: RunSectWarInput): SectWarResult {
       rivalFighterName: pair.rival.name,
       battle,
       loser,
+      death,
     };
   });
 
@@ -237,12 +252,18 @@ export type SectWarRecord = SectWarResult & {
   summary: string;
 };
 
-/** 由结算结果构造存档记录（summary 供纪事与会战记录页直接展示）。 */
+/** 由结算结果构造存档记录（summary 供纪事与会战记录页直接展示；有阵亡时附双亡人数）。 */
 export function sectWarRecord(result: SectWarResult, rivalName: string): SectWarRecord {
+  const playerDeaths = result.pairOutcomes.filter((pair) => pair.death?.side === "player").length;
+  const rivalDeaths = result.pairOutcomes.filter((pair) => pair.death?.side === "rival").length;
+  const deathNote =
+    playerDeaths + rivalDeaths > 0
+      ? `（我方阵亡 ${playerDeaths} 人，对方阵亡 ${rivalDeaths} 人）`
+      : "";
   const summary =
     result.winner === "player"
-      ? `会战获胜：击退${rivalName}，掠得灵石 ${result.plunder} 枚（${result.decidedBy === "wins" ? "胜场占优" : result.decidedBy === "totalDamage" ? "总伤害占优" : "势均力敌，天命在我"}）。`
-      : `会战失利：不敌${rivalName}，被掠走灵石 ${result.plunder} 枚。`;
+      ? `会战获胜：击退${rivalName}，掠得灵石 ${result.plunder} 枚（${result.decidedBy === "wins" ? "胜场占优" : result.decidedBy === "totalDamage" ? "总伤害占优" : "势均力敌，天命在我"}）${deathNote}。`
+      : `会战失利：不敌${rivalName}，被掠走灵石 ${result.plunder} 枚${deathNote}。`;
   return {
     ...result,
     rivalPrestigeDelta: result.winner === "player" ? -WAR_PRESTIGE_DELTA : WAR_PRESTIGE_DELTA,

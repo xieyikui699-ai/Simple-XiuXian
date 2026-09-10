@@ -29,7 +29,7 @@ export const MAGIC_FLAT_PER_REALM_LEVEL = 10;
 export const DEFENSE_BASE = 5;
 export const DEFENSE_PHYSIQUE_DIVISOR = 4;
 export const DEFENSE_FLAT_PER_REALM_LEVEL = 4;
-/** 暴击率 = 10 + 悟性/4 + 天赋暴击（上限 50）；暴伤 2×（见 battle.ts 的 CRIT_MULTIPLIER）。 */
+/** 暴击率 = 10 + 悟性/4 + 天赋暴击（上限 50），仅普通攻伐（物理）判定暴击；暴伤 2×（见 battle.ts 的 CRIT_MULTIPLIER）。 */
 export const BASE_CRIT_RATE = 10;
 export const CRIT_COMPREHENSION_DIVISOR = 4;
 export const MAX_CRIT_RATE = 50;
@@ -69,7 +69,7 @@ export type CombatProfile = {
   defense: number;
   /** 先攻 = 身法 + 天赋先攻 + 减速修正。 */
   firstStrike: number;
-  /** 暴击率（百分点，[5, 50]）。 */
+  /** 暴击率（百分点，[5, 50]）：仅普通攻伐（物理）判定，法术不暴击。 */
   critRate: number;
   /** 吸血比例（百分点）：天赋聚合。 */
   lifestealPct: number;

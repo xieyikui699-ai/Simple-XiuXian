@@ -39,7 +39,7 @@ export const WORKSHOP_MASTER_LIMIT = 1;
 /** 丹房炼制点数统一值（不选丹方：满点出炉时目录两种丹药各 50% 随机）。 */
 export const PILL_TASK_POINTS = 300;
 /** 器坊炼制点数统一值（不选图纸：满点出炉法宝目录十件随机其一）。 */
-export const GEAR_TASK_POINTS = 500;
+export const GEAR_TASK_POINTS = 2000;
 /** 每名投入的外门弟子每月 +1 点（基础点数，主持加成乘算其上）。 */
 export const WORKSHOP_POINTS_PER_OUTER_PER_MONTH = 1;
 /** 主持境界加成：每境界等级 +20%（练气前期 +20% … 元婴前期 +200% 封顶）。 */

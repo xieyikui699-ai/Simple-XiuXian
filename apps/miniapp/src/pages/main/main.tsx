@@ -16,8 +16,8 @@ import {
   workshopStaffedOuterCount,
 } from "@simple-xiuxian/engine";
 import { Button, Slider, Text, View } from "@tarojs/components";
-import { navigateTo, reLaunch, useDidShow } from "@tarojs/taro";
-import { useState } from "react";
+import { navigateTo, reLaunch, showModal, useDidShow } from "@tarojs/taro";
+import { useEffect, useRef, useState } from "react";
 import { getGameStore, useGame } from "../../store/use-game";
 import { AdvanceBar } from "../../ui/advance-bar";
 import {
@@ -81,10 +81,30 @@ export default function MainPage() {
   const store = getGameStore();
   const { state, lastResult, errorMessage } = useGame();
   const [pickingElder, setPickingElder] = useState(false);
+  // 胜利弹窗：吞并/元婴胜利出现时弹一次；开局前/败局（被吞并/凋敝）不弹，重复渲染不重弹。
+  const victoryShownKeyRef = useRef<string | null>(null);
 
   useDidShow(() => {
     if (!state) reLaunch({ url: "/pages/index/index" });
   });
+
+  useEffect(() => {
+    const ending = state?.ending;
+    if (!ending) {
+      victoryShownKeyRef.current = null;
+      return;
+    }
+    if (ending.kind !== "annexation" && ending.kind !== "nascent_soul") return;
+    const key = `${ending.kind}@${ending.turn}`;
+    if (victoryShownKeyRef.current === key) return;
+    victoryShownKeyRef.current = key;
+    showModal({
+      title: "恭喜游戏胜利",
+      content: "该游戏是简化前置版\n正式版开发中\n敬请期待",
+      showCancel: false,
+      confirmText: "知道了",
+    });
+  }, [state?.ending]);
 
   if (!state) return null;
 
@@ -118,19 +138,19 @@ export default function MainPage() {
         <View className="card sect-card">
           <View className="sect-head">
             <Text className="sect-name">{state.sectName}</Text>
-            <View className="sect-head-right">
-              {requirement && (
-                <Text className="upgrade-cost">{upgradeRequirementText(requirement)}</Text>
-              )}
-              <Button
-                className="btn-upgrade"
-                disabled={state.sectRank >= 3 || Boolean(state.ending)}
-                onClick={() => store.upgrade()}
-              >
-                宗门升阶
-              </Button>
-              <Text className="sect-turn">{formatTurn(state.currentTurn)}</Text>
-            </View>
+            <Text className="sect-turn">{formatTurn(state.currentTurn)}</Text>
+          </View>
+          <View className="sect-upgrade-row">
+            {requirement && (
+              <Text className="upgrade-cost">{upgradeRequirementText(requirement)}</Text>
+            )}
+            <Button
+              className="btn-upgrade"
+              disabled={state.sectRank >= 3 || Boolean(state.ending)}
+              onClick={() => store.upgrade()}
+            >
+              宗门升阶
+            </Button>
           </View>
           <View className="stat-grid">
             <View className="stat">
@@ -230,6 +250,9 @@ export default function MainPage() {
               title="任命灵矿长老（无职成年弟子，任内不历练、照常修炼）"
               hint="挖矿上缴按境界加成：每境界等级 +10%，元婴前期封顶 +100%。"
               disciples={mineElderCandidates(state)}
+              subText={(disciple) =>
+                `挖矿加成 +${Math.round(mineElderBonusPct(disciple.realmLevel) * 100)}%`
+              }
               onCancel={() => setPickingElder(false)}
               onPick={(discipleId) => {
                 store.appointElder(discipleId, "mine");

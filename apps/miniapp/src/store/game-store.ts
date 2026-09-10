@@ -18,6 +18,7 @@ import {
   recruitDisciple,
   removeElder,
   removeWorkshopJob,
+  setAutoPill,
   setWorkshopStaff,
   settleMonthly,
   startWorkshopTask,
@@ -132,6 +133,8 @@ export type GameStore = {
   wear(discipleId: string, slot: GearSlot, treasureId: string): void;
   /** 服用丹药：延寿丹 +30 寿命；聚灵丹 12 月真元 ×1.5（时长累加、倍率不叠加）。 */
   takePill(discipleId: string, pillId: string): void;
+  /** 自动服用丹药开关：启用/停用该弟子延寿丹（剩余寿命 ≤30 年自动服）或聚灵丹（增益失效自动续服）。 */
+  setAutoPill(discipleId: string, pillId: string, enabled: boolean): void;
   /** 玩家宣战：来月月结第 ⑦ 步触发会战。 */
   wageWar(): void;
   clearError(): void;
@@ -284,6 +287,13 @@ export function createGameStore(): GameStore {
       runEngineCommand(() => {
         if (!snapshot.state) throw new Error("disciple_not_found");
         const outcome = usePill(snapshot.state, discipleId, pillId);
+        commit({ state: outcome.state });
+      });
+    },
+    setAutoPill(discipleId, pillId, enabled) {
+      runEngineCommand(() => {
+        if (!snapshot.state) throw new Error("disciple_not_found");
+        const outcome = setAutoPill(snapshot.state, discipleId, pillId, enabled);
         commit({ state: outcome.state });
       });
     },

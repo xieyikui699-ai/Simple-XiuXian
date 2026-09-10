@@ -3,9 +3,12 @@ import {
   ATTRIBUTE_KEYS,
   GEAR_SLOT_DISPLAY_NAMES,
   GEAR_SLOT_KEYS,
+  MAX_SPELLS_PER_DISCIPLE,
   ROOT_ELEMENT_DISPLAY_NAMES,
   ROOT_TYPE_DISPLAY_NAMES,
+  SPELLS,
   SPELL_AFFINITY_PCT,
+  TREASURES,
   buildCombatProfile,
   discipleCultivationView,
   effectiveAttributes,
@@ -17,14 +20,21 @@ import {
   spellAffinityMultiplier,
   talentById,
 } from "@simple-xiuxian/engine";
-import type { RootElement, Spell, TechniqueEffect, Treasure } from "@simple-xiuxian/engine";
+import type {
+  GearSlot,
+  RootElement,
+  Spell,
+  TechniqueEffect,
+  Treasure,
+} from "@simple-xiuxian/engine";
 import { Button, Text, View } from "@tarojs/components";
 import { getCurrentInstance, navigateBack, reLaunch } from "@tarojs/taro";
 import { Fragment, useState } from "react";
-import { useGame } from "../../store/use-game";
+import { getGameStore, useGame } from "../../store/use-game";
 import { AdvanceBar } from "../../ui/advance-bar";
 import { GENDER_DISPLAY_NAMES, formatZhenyuanRequirement, realmToneClass } from "../../ui/display";
 import { BackBar } from "../../ui/nav";
+import { OptionPicker } from "../../ui/picker";
 import "./disciple-detail.css";
 
 /** 功法被动效果 → 展示文案（逐行，数值与 catalog 目录同源）。 */
@@ -114,13 +124,17 @@ function spellEffectLines(spell: Spell, rootElements: readonly RootElement[]): s
 }
 
 export default function DiscipleDetailPage() {
-  const { state } = useGame();
-  // 功法/法术/法宝行可点按，在行下展开效果明细；同一时间只展开一节。
+  const store = getGameStore();
+  const { state, errorMessage } = useGame();
+  // 功法/法术/法宝行可点按：已有条目时展开效果明细；未修/未穿戴时点按从仓库/藏经阁选用。
   const [expandedSection, setExpandedSection] = useState<"technique" | "spell" | "gear" | null>(
     null,
   );
   const toggleSection = (key: "technique" | "spell" | "gear") =>
     setExpandedSection((current) => (current === key ? null : key));
+  // 从仓库选用弹层：功法/法术共用 artPicker（藏经阁研读），法宝按槽位从仓库穿戴。
+  const [artPicker, setArtPicker] = useState<"technique" | "spell" | null>(null);
+  const [gearPickerSlot, setGearPickerSlot] = useState<GearSlot | null>(null);
 
   const params = getCurrentInstance().router?.params ?? {};
   const discipleId = params.id ?? "";
@@ -156,9 +170,53 @@ export default function DiscipleDetailPage() {
   const effective = effectiveAttributes(disciple.attributes, disciple.talentIds);
   const combat = buildCombatProfile(disciple);
   const view = discipleCultivationView(state, disciple);
+  // 聚灵丹：生效期内在真元行中间标注 buff 效果与剩余月数（与结算侧 monthlyZhenyuanGain 同口径）。
+  const focusUntil = disciple.spiritFocusUntilTurn ?? 0;
+  const focusActive = focusUntil >= state.currentTurn;
+  const focusMonthsLeft = Math.max(0, focusUntil - state.currentTurn + 1);
   const spellIds = disciple.spellIds ?? [];
   const equipped = disciple.equippedGear ?? {};
   const injuryMonths = injuryMonthsLeftFor(disciple, state.currentTurn);
+
+  // 从仓库/藏经阁选用：候选未入门不可操作；终局后锁定。
+  const canManage = !isCandidate && state.ending === undefined;
+  const library = state.library ?? { techniqueIds: [], spellIds: [] };
+  const warehouse = state.warehouse ?? { gear: [], pills: [] };
+  const techniqueOptions = library.techniqueIds.map((artId) => {
+    const technique = getTechniqueById(artId);
+    return {
+      key: artId,
+      title: `《${technique?.name ?? artId}》`,
+      sub: technique ? techniqueEffectLines(technique.effect).join("；") : undefined,
+      disabledReason: disciple.techniqueId
+        ? `已修《${getTechniqueById(disciple.techniqueId)?.name ?? disciple.techniqueId}》，限修一门`
+        : "",
+    };
+  });
+  const spellOptions = SPELLS.filter((spell) => library.spellIds.includes(spell.id)).map(
+    (spell) => ({
+      key: spell.id,
+      title: `《${spell.name}》`,
+      sub: spellEffectLines(spell, disciple.rootElements).join("；"),
+      disabledReason: spellIds.includes(spell.id)
+        ? "已在修此法术"
+        : spellIds.length >= MAX_SPELLS_PER_DISCIPLE
+          ? `法术已满 ${MAX_SPELLS_PER_DISCIPLE} 门`
+          : "",
+    }),
+  );
+  const gearOptionsFor = (slot: GearSlot) => {
+    const counts = new Map<string, number>();
+    for (const entry of warehouse.gear) {
+      if (entry.slot !== slot) continue;
+      counts.set(entry.treasureId, (counts.get(entry.treasureId) ?? 0) + 1);
+    }
+    return TREASURES.filter((treasure) => counts.has(treasure.id)).map((treasure) => ({
+      key: treasure.id,
+      title: `「${treasure.name}」 ×${counts.get(treasure.id)}`,
+      sub: treasureEffectLines(treasure).join("；"),
+    }));
+  };
 
   return (
     <View className="page">
@@ -172,6 +230,32 @@ export default function DiscipleDetailPage() {
             </View>
             <Text className={realmToneClass(disciple.realmLevel)}>{view.stageName}</Text>
           </View>
+          {canManage && (
+            <View className="auto-pill-block">
+              <View className="auto-pill-row">
+                <Text className="auto-pill-label">自动服用丹药</Text>
+                <View
+                  className={`auto-pill-chip${disciple.autoPillYanshou ? " auto-pill-chip-on" : ""}`}
+                  onClick={() =>
+                    store.setAutoPill(disciple.id, "pill-yanshou", !disciple.autoPillYanshou)
+                  }
+                >
+                  <Text>{disciple.autoPillYanshou ? "☑" : "☐"} 延寿丹</Text>
+                </View>
+                <View
+                  className={`auto-pill-chip${disciple.autoPillJuling ? " auto-pill-chip-on" : ""}`}
+                  onClick={() =>
+                    store.setAutoPill(disciple.id, "pill-juling", !disciple.autoPillJuling)
+                  }
+                >
+                  <Text>{disciple.autoPillJuling ? "☑" : "☐"} 聚灵丹</Text>
+                </View>
+              </View>
+              <Text className="muted">
+                延寿丹：剩余寿命 ≤30 年自动服 · 聚灵丹：增益失效自动续服
+              </Text>
+            </View>
+          )}
           <Text className="muted">
             {GENDER_DISPLAY_NAMES[disciple.gender]} · {disciple.age}/{disciple.maxLifespan} 岁 ·
             灵根：{ROOT_TYPE_DISPLAY_NAMES[disciple.rootType]}（
@@ -236,6 +320,9 @@ export default function DiscipleDetailPage() {
           </View>
           <View className="attr-row">
             <Text>真元</Text>
+            {focusActive && (
+              <Text className="pill-badge">聚灵丹 ×1.5 · 剩 {focusMonthsLeft} 月</Text>
+            )}
             <Text>
               {disciple.zhenyuan}/{formatZhenyuanRequirement(view.requiredZhenyuan)}
             </Text>
@@ -252,7 +339,11 @@ export default function DiscipleDetailPage() {
 
         <View className="card">
           <View className="card-title">功法 · 法术 · 法宝 · 伤势</View>
-          <Text className="muted">点按功法 / 法术 / 法宝行查看效果。</Text>
+          {errorMessage !== null && (
+            <Text className="error-line" onClick={() => store.clearError()}>
+              {errorMessage}（点击关闭）
+            </Text>
+          )}
           {(() => {
             const technique = disciple.techniqueId
               ? getTechniqueById(disciple.techniqueId)
@@ -260,8 +351,11 @@ export default function DiscipleDetailPage() {
             return (
               <>
                 <View
-                  className={`attr-row${technique ? " attr-row-tap" : ""}`}
-                  onClick={technique ? () => toggleSection("technique") : undefined}
+                  className={`attr-row${technique || canManage ? " attr-row-tap" : ""}`}
+                  onClick={() => {
+                    if (technique) toggleSection("technique");
+                    else if (canManage) setArtPicker("technique");
+                  }}
                 >
                   <Text>功法</Text>
                   <Text>
@@ -270,7 +364,7 @@ export default function DiscipleDetailPage() {
                         《{technique.name}》 {expandedSection === "technique" ? "▾" : "▸"}
                       </>
                     ) : (
-                      "未修"
+                      "未修 · 点按选用"
                     )}
                   </Text>
                 </View>
@@ -287,13 +381,16 @@ export default function DiscipleDetailPage() {
             );
           })()}
           <View
-            className={`attr-row${spellIds.length > 0 ? " attr-row-tap" : ""}`}
-            onClick={spellIds.length > 0 ? () => toggleSection("spell") : undefined}
+            className={`attr-row${spellIds.length > 0 || canManage ? " attr-row-tap" : ""}`}
+            onClick={() => {
+              if (spellIds.length > 0) toggleSection("spell");
+              else if (canManage) setArtPicker("spell");
+            }}
           >
             <Text>法术</Text>
             <Text>
               {spellIds.length === 0 ? (
-                "未修"
+                "未修 · 点按选用"
               ) : (
                 <>
                   {spellIds.map((id) => `《${getSpellById(id)?.name ?? id}》`).join("、")}{" "}
@@ -318,6 +415,11 @@ export default function DiscipleDetailPage() {
                   </View>
                 );
               })}
+              {canManage && (
+                <Button className="btn-mini" onClick={() => setArtPicker("spell")}>
+                  从藏经阁加修法术（{spellIds.length}/{MAX_SPELLS_PER_DISCIPLE}）
+                </Button>
+              )}
             </View>
           )}
           {GEAR_SLOT_KEYS.map((slot) => {
@@ -325,8 +427,11 @@ export default function DiscipleDetailPage() {
             return (
               <Fragment key={slot}>
                 <View
-                  className={`attr-row${treasure ? " attr-row-tap" : ""}`}
-                  onClick={treasure ? () => toggleSection("gear") : undefined}
+                  className={`attr-row${treasure || canManage ? " attr-row-tap" : ""}`}
+                  onClick={() => {
+                    if (treasure) toggleSection("gear");
+                    else if (canManage) setGearPickerSlot(slot);
+                  }}
                 >
                   <Text>{GEAR_SLOT_DISPLAY_NAMES[slot]}</Text>
                   <Text>
@@ -335,7 +440,7 @@ export default function DiscipleDetailPage() {
                         「{treasure.name}」 {expandedSection === "gear" ? "▾" : "▸"}
                       </>
                     ) : (
-                      "未穿戴"
+                      "未穿戴 · 点按选用"
                     )}
                   </Text>
                 </View>
@@ -346,6 +451,11 @@ export default function DiscipleDetailPage() {
                         {line}
                       </Text>
                     ))}
+                    {canManage && (
+                      <Button className="btn-mini" onClick={() => setGearPickerSlot(slot)}>
+                        从仓库更换{GEAR_SLOT_DISPLAY_NAMES[slot]}
+                      </Button>
+                    )}
                   </View>
                 )}
               </Fragment>
@@ -359,12 +469,47 @@ export default function DiscipleDetailPage() {
                 : "无"}
             </Text>
           </View>
-          {(disciple.spiritFocusUntilTurn ?? 0) >= state.currentTurn && (
-            <Text className="muted">
-              聚灵丹生效中：真元 ×1.5（至 {disciple.spiritFocusUntilTurn} 回目）。
-            </Text>
-          )}
         </View>
+
+        {artPicker === "technique" && (
+          <OptionPicker
+            title={`为${disciple.name}选用功法`}
+            hint="研读藏经阁书册；功法限修 1 门，书册研读后消耗。"
+            emptyText="藏经阁暂无功法书册，历练奇遇可得。"
+            items={techniqueOptions}
+            onCancel={() => setArtPicker(null)}
+            onPick={(artId) => {
+              store.study(disciple.id, artId);
+              setArtPicker(null);
+            }}
+          />
+        )}
+        {artPicker === "spell" && (
+          <OptionPicker
+            title={`为${disciple.name}选用法术`}
+            hint={`法术限修 ${MAX_SPELLS_PER_DISCIPLE} 门，研读后书册消耗。`}
+            emptyText="藏经阁暂无藏书，历练奇遇可得。"
+            items={spellOptions}
+            onCancel={() => setArtPicker(null)}
+            onPick={(artId) => {
+              store.study(disciple.id, artId);
+              setArtPicker(null);
+            }}
+          />
+        )}
+        {gearPickerSlot !== null && (
+          <OptionPicker
+            title={`为${disciple.name}选用${GEAR_SLOT_DISPLAY_NAMES[gearPickerSlot]}`}
+            hint="穿戴仓库法宝；同槽已穿法宝将卸下回仓。"
+            emptyText="仓库暂无该槽位法宝，历练掉落与器坊炼制可得。"
+            items={gearOptionsFor(gearPickerSlot)}
+            onCancel={() => setGearPickerSlot(null)}
+            onPick={(treasureId) => {
+              store.wear(disciple.id, gearPickerSlot, treasureId);
+              setGearPickerSlot(null);
+            }}
+          />
+        )}
       </View>
       <AdvanceBar />
     </View>
