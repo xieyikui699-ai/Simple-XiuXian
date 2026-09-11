@@ -1,0 +1,37 @@
+/* 攻略页：卡片分节 + 行首小标题条目。 */
+.guide-item {
+  display: flex;
+  flex-direction: row;
+  gap: 16rpx;
+  padding: 12rpx 0;
+  border-bottom: 2rpx dashed var(--line);
+}
+
+.guide-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.guide-label {
+  flex: 0 0 176rpx;
+  color: var(--accent-deep);
+  font-size: 24rpx;
+  font-weight: 600;
+  white-space: nowrap;
+  padding-top: 3rpx;
+}
+
+.guide-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 25rpx;
+  line-height: 1.65;
+}
+
+.guide-footer {
+  display: block;
+  margin: 8rpx 0 24rpx;
+  color: var(--muted);
+  font-size: 24rpx;
+  text-align: center;
+}

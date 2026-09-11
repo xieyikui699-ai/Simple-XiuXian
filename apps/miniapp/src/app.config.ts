@@ -9,6 +9,7 @@ export default {
     "pages/rival/rival",
     "pages/chronicle/chronicle",
     "pages/ending/ending",
+    "pages/guide/guide",
   ],
   window: {
     backgroundTextStyle: "light",

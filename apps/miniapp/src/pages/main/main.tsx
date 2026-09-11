@@ -138,6 +138,9 @@ export default function MainPage() {
         <View className="card sect-card">
           <View className="sect-head">
             <Text className="sect-name">{state.sectName}</Text>
+            <Button className="btn-guide" onClick={() => navigateTo({ url: "/pages/guide/guide" })}>
+              游戏攻略
+            </Button>
             <Text className="sect-turn">{formatTurn(state.currentTurn)}</Text>
           </View>
           <View className="sect-upgrade-row">

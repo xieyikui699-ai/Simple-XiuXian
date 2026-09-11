@@ -46,6 +46,22 @@
   font-size: 24rpx;
 }
 
+/* 游戏攻略：宗门名与回合数之间的胶囊小按钮，点击进攻略页（pages/guide）。
+   display/width/::after 重置走 app.css 共享按钮基线（与 .btn-upgrade 同口径，
+   否则 Taro H5 按钮默认 width:100% 会拉满 flex 行）；这里只补 flex 行内口径 + 胶囊尺寸 + 配色。 */
+.btn-guide {
+  flex: 0 0 auto;
+  margin: 0 12rpx;
+  height: 52rpx;
+  line-height: 52rpx;
+  padding: 0 22rpx;
+  font-size: 24rpx;
+  border-radius: 999rpx;
+  background: var(--card-2);
+  color: var(--accent-deep);
+  border: 2rpx solid var(--line-strong);
+}
+
 .stat-grid {
   display: flex;
   flex-direction: row;

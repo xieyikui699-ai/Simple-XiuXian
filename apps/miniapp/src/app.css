@@ -115,6 +115,7 @@ body {
 .btn-admit,
 .btn-mini,
 .btn-save,
+.btn-guide,
 .continue-resume {
   margin: 0;
   padding: 0 30rpx;
@@ -139,6 +140,7 @@ body {
 .btn-admit::after,
 .btn-mini::after,
 .btn-save::after,
+.btn-guide::after,
 .continue-resume::after {
   border: none;
 }
